@@ -30,6 +30,14 @@ _tool_calls = _reference_meter.create_histogram(
     unit="{tool_call}",
     description="The number of tool calls a GenAI agent makes during a single invocation.",
 )
+# `gen_ai.execute_tool.duration` carries `gen_ai.agent.interaction.type` when the
+# tool call is a delegation/handoff to another agent; `gen_ai.agent.name` then
+# identifies the target agent (see model/gen-ai/metrics.yaml).
+_execute_tool_duration = _reference_meter.create_histogram(
+    "gen_ai.execute_tool.duration",
+    unit="s",
+    description="The duration of a single tool execution.",
+)
 
 
 class SpanCounter(SpanProcessor):
@@ -379,6 +387,137 @@ def run_memory_reference():
     asyncio.run(_run())
 
 
+def run_multi_agent_delegation_reference():
+    """Delegation: a caller agent invokes a sub-agent exposed via ``AgentTool``.
+
+    ``google.adk.tools.agent_tool.AgentTool`` is ADK's agent-as-tool API: the
+    caller invokes the wrapped agent as a tool and receives its output back, so
+    the caller expects a result to return -- a ``delegation`` interaction, mapped
+    directly from the API being invoked (not inferred from arguments or topology).
+    The caller-owned ``execute_tool`` span carries ``gen_ai.agent.interaction.type``
+    and names the target (the wrapped agent); the child ``invoke_agent`` span
+    carries only the target's executing identity. The sub-agent's model call is
+    handed to google-genai, so no inference span is emitted here.
+    """
+    from google.adk.agents import Agent
+    from google.adk.models.google_llm import Gemini
+    from google.adk.runners import Runner
+    from google.adk.sessions import InMemorySessionService
+    from google.adk.tools.agent_tool import AgentTool
+    from google.genai import types
+
+    print("  [delegation] agent-as-tool via AgentTool (reference implementation)")
+
+    os.environ.setdefault("GOOGLE_API_KEY", "mock-key")
+    request_model = "gemini-2.0-flash"
+    input_text = "What's the weather in Seattle?"
+
+    with _suppress_adk_native_telemetry():
+        # The target sub-agent has no tools, so its mock model call returns text.
+        specialist = Agent(
+            name="weather_specialist",
+            description="Answers weather questions for a given location.",
+            model=Gemini(model=request_model, base_url=MOCK_BASE_URL),
+            instruction="You report the weather.",
+        )
+        agent_tool = AgentTool(agent=specialist)
+
+        # Wrap the tool's public run_async to open the caller-owned execute_tool
+        # span around the real sub-agent invocation. The entry point stays
+        # runner.run_async; only this seam is instrumented.
+        original_run_async = agent_tool.run_async
+
+        async def _traced_run_async(*, args, tool_context):
+            tool_span_attributes = {
+                "gen_ai.operation.name": "execute_tool",
+                "gen_ai.tool.name": agent_tool.name,
+                "gen_ai.tool.type": "function",
+            }
+            start = time.perf_counter()
+            with _reference_tracer.start_as_current_span(
+                f"execute_tool {agent_tool.name}", attributes=tool_span_attributes
+            ) as tool_span:
+                # `direct`: AgentTool is an agent-as-tool delegation API, so the
+                # type is intrinsic to the call; the target is the wrapped agent.
+                tool_span.set_attribute("gen_ai.agent.interaction.type", "delegation")
+                tool_span.set_attribute("gen_ai.agent.name", specialist.name)
+                if tool_context.function_call_id:
+                    tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
+                tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps(args))
+                # Child invoke_agent span: the target's own execution, identified
+                # only by its name and with no interaction type.
+                sub_agent_span_attributes = {
+                    "gen_ai.operation.name": "invoke_agent",
+                    "gen_ai.request.model": request_model,
+                    "gen_ai.agent.name": specialist.name,
+                }
+                with _reference_tracer.start_as_current_span(
+                    f"invoke_agent {specialist.name}", attributes=sub_agent_span_attributes
+                ) as sub_agent_span:
+                    result = await original_run_async(args=args, tool_context=tool_context)
+                    sub_agent_span.set_attribute(
+                        "gen_ai.output.messages",
+                        json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(result)}]}]),
+                    )
+                tool_span.set_attribute("gen_ai.tool.call.result", str(result))
+            _execute_tool_duration.record(
+                time.perf_counter() - start,
+                {
+                    "gen_ai.tool.name": agent_tool.name,
+                    "gen_ai.tool.type": "function",
+                    "gen_ai.agent.interaction.type": "delegation",
+                    "gen_ai.agent.name": specialist.name,
+                },
+            )
+            return result
+
+        agent_tool.run_async = _traced_run_async
+
+        root_agent = Agent(
+            name="root_agent",
+            description="Routes questions to specialist agents.",
+            model=Gemini(model=request_model, base_url=MOCK_BASE_URL),
+            instruction="Delegate weather questions to the weather_specialist tool.",
+            tools=[agent_tool],
+        )
+        session_service = InMemorySessionService()
+        runner = Runner(agent=root_agent, app_name="delegation_app", session_service=session_service)
+
+        async def _run():
+            session = await session_service.create_session(app_name="delegation_app", user_id="test_user")
+            agent_span_attributes = {
+                "gen_ai.operation.name": "invoke_agent",
+                "gen_ai.request.model": request_model,
+                "gen_ai.agent.name": root_agent.name,
+            }
+            with _reference_tracer.start_as_current_span(
+                "invoke_agent root_agent", attributes=agent_span_attributes
+            ) as agent_span:
+                agent_span.set_attribute("gen_ai.conversation.id", session.id)
+                agent_span.set_attribute(
+                    "gen_ai.input.messages",
+                    json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}]),
+                )
+                last_text = ""
+                async for event in runner.run_async(
+                    user_id="test_user",
+                    session_id=session.id,
+                    new_message=types.Content(role="user", parts=[types.Part(text=input_text)]),
+                ):
+                    if event.content and event.content.parts:
+                        text = event.content.parts[0].text
+                        if text:
+                            last_text = text
+                if last_text:
+                    agent_span.set_attribute(
+                        "gen_ai.output.messages",
+                        json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": last_text}]}]),
+                    )
+                    print(f"    -> {last_text[:60]}")
+
+        asyncio.run(_run())
+
+
 def main():
     print("=== Reference Implementation: Google ADK Reference Implementation ===")
 
@@ -388,6 +527,7 @@ def main():
     tp.add_span_processor(span_counter)
 
     run_agent_reference()
+    run_multi_agent_delegation_reference()
     run_memory_reference()
 
     print(f"\n  [diagnostic] Spans generated: {span_counter.count}")
