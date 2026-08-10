@@ -1126,6 +1126,10 @@ record this metric for every tool execution they can observe.
 When this metric is reported alongside a `gen_ai.execute_tool` span,
 the metric value SHOULD be the same as the span duration.
 
+When `gen_ai.agent.interaction.type` is present, `gen_ai.agent.name`
+identifies the target agent receiving the delegation or handoff;
+otherwise it identifies the agent executing the tool.
+
 **Requirement level:** [Recommended](https://github.com/open-telemetry/semantic-conventions/blob/v1.44.0/docs/general/signal-requirement-level.md).
 
 **Attributes:**
@@ -1134,14 +1138,25 @@ the metric value SHOULD be the same as the span duration.
 | --- | --- | --- | --- | --- | --- |
 | [`gen_ai.tool.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Required` | string | Name of the tool utilized by the agent. | `Flights` |
 | [`error.type`](https://github.com/open-telemetry/semantic-conventions/blob/v1.44.0/docs/registry/attributes/error.md) | ![Stable](https://img.shields.io/badge/-stable-lightgreen) | `Conditionally Required` If the operation ended in an error. | string | Describes a class of error the operation ended with. [1] | `timeout`; `java.net.UnknownHostException`; `server_certificate_invalid`; `500` |
-| [`gen_ai.agent.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` When applicable. | string | The human-readable name of the agent executing the tool. | `Math Tutor`; `Fiction Writer` |
-| [`gen_ai.tool.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` If available. | string | Type of the tool utilized by the agent [2] | `function`; `extension`; `datastore` |
+| [`gen_ai.agent.interaction.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [2] | string | The explicitly observed interaction type between two GenAI agents. [3] | `delegation`; `handoff` |
+| [`gen_ai.agent.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` When applicable. | string | When `gen_ai.agent.interaction.type` is present, identifies the target agent receiving the delegation or handoff; otherwise identifies the agent executing the tool. | `Math Tutor`; `Fiction Writer` |
+| [`gen_ai.tool.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` If available. | string | Type of the tool utilized by the agent [4] | `function`; `extension`; `datastore` |
 
 **[1] `error.type`:** The `error.type` SHOULD match the error code returned by the Generative AI provider or the client library,
 the canonical name of exception that occurred, or another low-cardinality error identifier.
 Instrumentations SHOULD document the list of errors they report.
 
-**[2] `gen_ai.tool.type`:** Extension: A tool executed on the agent-side to directly call external APIs, bridging the gap between the agent and real-world systems.
+**[2] `gen_ai.agent.interaction.type`:** When the instrumented framework or protocol explicitly distinguishes the tool call as a delegation or handoff to another agent.
+
+**[3] `gen_ai.agent.interaction.type`:** This attribute applies to the caller-owned operation that directs work to
+another agent. It MUST NOT be inferred from span hierarchy or recorded on
+the target agent execution span.
+
+When this attribute is present, `gen_ai.agent.name` on the same span MUST
+identify the target agent receiving the delegation or handoff, not the source
+agent that owns the span.
+
+**[4] `gen_ai.tool.type`:** Extension: A tool executed on the agent-side to directly call external APIs, bridging the gap between the agent and real-world systems.
   Agent-side operations involve actions that are performed by the agent on the server or within the agent's controlled environment.
 Function: A tool executed on the client-side, where the agent generates parameters for a predefined function, and the client executes the logic.
   Client-side operations are actions taken on the user's end or within the client application.
@@ -1154,6 +1169,15 @@ Datastore: A tool used by the agent to access and query structured or unstructur
 | Value | Description | Stability |
 | --- | --- | --- |
 | `_OTHER` | A fallback error value to be used when the instrumentation doesn't define a custom value. | ![Stable](https://img.shields.io/badge/-stable-lightgreen) |
+
+---
+
+`gen_ai.agent.interaction.type` has the following list of well-known values. If one of them applies, then the respective value MUST be used; otherwise, a custom value MAY be used.
+
+| Value | Description | Stability |
+| --- | --- | --- |
+| `delegation` | The source agent expects control or a result to return. | ![Development](https://img.shields.io/badge/-development-blue) |
+| `handoff` | The source agent transfers ownership of the remaining work. | ![Development](https://img.shields.io/badge/-development-blue) |
 
 <!-- prettier-ignore-end -->
 <!-- END AUTOGENERATED TEXT -->
