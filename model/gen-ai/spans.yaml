@@ -481,6 +481,11 @@ spans:
     note: |
       The `gen_ai.operation.name` SHOULD be `invoke_agent`.
 
+      This is a caller-owned operation span. `gen_ai.agent.*` attributes on this span
+      identify the **target agent** that is being invoked, not the agent that owns the span.
+      The target agent's own execution is represented by a child span created by the executing agent;
+      `gen_ai.agent.interaction.type` MUST NOT be copied to that target execution span.
+
       Examples: OpenAI Assistants API, AWS Bedrock Agents.
     stability: development
     attributes:
@@ -512,7 +517,7 @@ spans:
           conditionally_required: When available.
       - ref: gen_ai.agent.interaction.type
         requirement_level:
-          conditionally_required: When the instrumentation explicitly observes a delegation or handoff to another agent.
+          conditionally_required: When the instrumented framework or protocol explicitly distinguishes the operation as a delegation or handoff to another agent.
 
   - type: gen_ai.invoke_agent.internal
     requirement_level: recommended
@@ -527,6 +532,11 @@ spans:
     note: |
       The `gen_ai.operation.name` SHOULD be `invoke_agent`.
 
+      This is a caller-owned operation span. `gen_ai.agent.*` attributes on this span
+      identify the **target agent** that is being invoked, not the agent that owns the span.
+      The target agent's own execution is represented by a child span created by the executing agent;
+      `gen_ai.agent.interaction.type` MUST NOT be copied to that target execution span.
+
       Examples: LangChain agents, CrewAI agents.
     stability: development
     attributes:
@@ -539,7 +549,7 @@ spans:
         sampling_relevant: true
       - ref: gen_ai.agent.interaction.type
         requirement_level:
-          conditionally_required: When the instrumentation explicitly observes a delegation or handoff to another agent.
+          conditionally_required: When the instrumented framework or protocol explicitly distinguishes the operation as a delegation or handoff to another agent.
 
   - type: gen_ai.execute_tool.internal
     requirement_level: recommended
@@ -560,6 +570,14 @@ spans:
       are encouraged to follow this semantic convention for tools invoked by their
       own code and to manually instrument any tool calls that automatic
       instrumentations do not cover.
+
+      When a tool call is itself a tool-mediated agent-directed operation (for example,
+      a tool whose sole purpose is to invoke or hand off to another agent), and the
+      instrumented framework or protocol explicitly classifies the call as a delegation
+      or handoff, `gen_ai.agent.interaction.type` SHOULD be recorded on this span.
+      `gen_ai.agent.name` on this span continues to identify the tool's owning or
+      executing agent, not a target agent; do not use this span's `gen_ai.agent.name`
+      to describe the delegation target.
     stability: development
     attributes:
       - ref_group: attributes.gen_ai.error
@@ -583,7 +601,7 @@ spans:
         requirement_level: opt_in
       - ref: gen_ai.agent.interaction.type
         requirement_level:
-          conditionally_required: When the instrumentation explicitly observes a delegation or handoff to another agent.
+          conditionally_required: When the instrumented framework or protocol explicitly distinguishes the tool call as a delegation or handoff to another agent.
 
   - type: gen_ai.invoke_workflow.internal
     requirement_level: recommended
