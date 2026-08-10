@@ -575,9 +575,11 @@ spans:
       a tool whose sole purpose is to invoke or hand off to another agent), and the
       instrumented framework or protocol explicitly classifies the call as a delegation
       or handoff, `gen_ai.agent.interaction.type` SHOULD be recorded on this span.
-      `gen_ai.agent.name` on this span continues to identify the tool's owning or
-      executing agent, not a target agent; do not use this span's `gen_ai.agent.name`
-      to describe the delegation target.
+      When `gen_ai.agent.interaction.type` is present, `gen_ai.agent.name` on this span
+      MUST identify the target agent receiving the delegation or handoff. On ordinary
+      `execute_tool` spans without `gen_ai.agent.interaction.type`, `gen_ai.agent.name`
+      retains its default meaning: the agent that owns or is executing the tool operation.
+      The target agent's own execution MUST NOT carry `gen_ai.agent.interaction.type`.
     stability: development
     attributes:
       - ref_group: attributes.gen_ai.error

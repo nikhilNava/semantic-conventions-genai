@@ -399,6 +399,10 @@ attributes:
       This attribute applies to the caller-owned operation that directs work to
       another agent. It MUST NOT be inferred from span hierarchy or recorded on
       the target agent execution span.
+
+      When this attribute is present, `gen_ai.agent.name` on the same span MUST
+      identify the target agent receiving the delegation or handoff, not the source
+      agent that owns the span. The source agent remains the parent execution context.
     stability: development
   - key: gen_ai.tool.name
     type: string
