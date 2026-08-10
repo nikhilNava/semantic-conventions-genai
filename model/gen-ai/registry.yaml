@@ -383,6 +383,23 @@ attributes:
     brief: The version of the GenAI agent.
     examples: ["1.0.0", "2025-05-01"]
     stability: development
+  - key: gen_ai.agent.interaction.type
+    type:
+      members:
+        - id: delegation
+          value: "delegation"
+          brief: The source agent expects control or a result to return.
+          stability: development
+        - id: handoff
+          value: "handoff"
+          brief: The source agent transfers ownership of the remaining work.
+          stability: development
+    brief: The explicitly observed interaction type between two GenAI agents.
+    note: |
+      This attribute applies to the caller-owned operation that directs work to
+      another agent. It MUST NOT be inferred from span hierarchy or recorded on
+      the target agent execution span.
+    stability: development
   - key: gen_ai.tool.name
     type: string
     brief: Name of the tool utilized by the agent.

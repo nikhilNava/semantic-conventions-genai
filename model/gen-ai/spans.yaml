@@ -510,6 +510,9 @@ spans:
         brief: The version of the invoked GenAI agent.
         requirement_level:
           conditionally_required: When available.
+      - ref: gen_ai.agent.interaction.type
+        requirement_level:
+          conditionally_required: When the instrumentation explicitly observes a delegation or handoff to another agent.
 
   - type: gen_ai.invoke_agent.internal
     requirement_level: recommended
@@ -534,6 +537,9 @@ spans:
         sampling_relevant: true
       - ref: gen_ai.agent.name
         sampling_relevant: true
+      - ref: gen_ai.agent.interaction.type
+        requirement_level:
+          conditionally_required: When the instrumentation explicitly observes a delegation or handoff to another agent.
 
   - type: gen_ai.execute_tool.internal
     requirement_level: recommended
@@ -575,6 +581,9 @@ spans:
         requirement_level: opt_in
       - ref: gen_ai.tool.call.result
         requirement_level: opt_in
+      - ref: gen_ai.agent.interaction.type
+        requirement_level:
+          conditionally_required: When the instrumentation explicitly observes a delegation or handoff to another agent.
 
   - type: gen_ai.invoke_workflow.internal
     requirement_level: recommended
