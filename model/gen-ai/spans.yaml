@@ -487,8 +487,8 @@ spans:
 
       This is a caller-owned operation span. `gen_ai.agent.*` attributes on this span
       identify the **target agent** that is being invoked, not the agent that owns the span.
-      The target agent's own execution is represented by a child span created by the executing agent;
-      `gen_ai.agent.interaction.type` MUST NOT be copied to that target execution span.
+      The target agent's own execution may be represented by a separate `invoke_agent` span;
+      that execution span MUST NOT carry `gen_ai.agent.interaction.type`.
 
       Examples: OpenAI Assistants API, AWS Bedrock Agents.
     stability: development
@@ -538,8 +538,8 @@ spans:
 
       This is a caller-owned operation span. `gen_ai.agent.*` attributes on this span
       identify the **target agent** that is being invoked, not the agent that owns the span.
-      The target agent's own execution is represented by a child span created by the executing agent;
-      `gen_ai.agent.interaction.type` MUST NOT be copied to that target execution span.
+      The target agent's own execution may be represented by a separate `invoke_agent` span;
+      that execution span MUST NOT carry `gen_ai.agent.interaction.type`.
 
       Examples: LangChain agents, CrewAI agents.
     stability: development
