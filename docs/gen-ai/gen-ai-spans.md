@@ -1079,14 +1079,12 @@ are encouraged to follow this semantic convention for tools invoked by their
 own code and to manually instrument any tool calls that automatic
 instrumentations do not cover.
 
-When a tool call is itself a tool-mediated agent-directed operation (for example,
-a tool whose sole purpose is to invoke or hand off to another agent), and the
-instrumented framework or protocol explicitly classifies the call as a delegation
-or handoff, `gen_ai.agent.interaction.type` SHOULD be recorded on this span.
-When `gen_ai.agent.interaction.type` is present, `gen_ai.agent.name` on this span
+Some tool calls are themselves agent-directed operations: the tool exists to
+invoke or hand off to another agent. On those, `gen_ai.agent.interaction.type`
+records how the framework or protocol classifies the call, and `gen_ai.agent.name`
 MUST identify the target agent receiving the delegation or handoff. On ordinary
-`execute_tool` spans without `gen_ai.agent.interaction.type`, `gen_ai.agent.name`
-retains its default meaning: the agent that owns or is executing the tool operation.
+`execute_tool` spans, which do not carry `gen_ai.agent.interaction.type`,
+`gen_ai.agent.name` retains its default meaning: the agent executing the tool.
 The target agent's own execution MUST NOT carry `gen_ai.agent.interaction.type`.
 
 **Span name** SHOULD be `execute_tool {gen_ai.tool.name}`.
@@ -1120,13 +1118,13 @@ Instrumentations SHOULD document the list of errors they report.
 
 **[3] `gen_ai.agent.interaction.type`:** When the instrumented framework or protocol explicitly distinguishes the tool call as a delegation or handoff to another agent.
 
-**[4] `gen_ai.agent.interaction.type`:** This attribute applies to the caller-owned operation that directs work to
-another agent. It MUST NOT be inferred from span hierarchy or recorded on
-the target agent execution span.
+**[4] `gen_ai.agent.interaction.type`:** This attribute applies to the tool call that directs work to another agent: a tool
+that exists to invoke or hand off to that agent. It MUST NOT be inferred from span
+hierarchy or recorded on the target agent's own execution span.
 
-When this attribute is present, `gen_ai.agent.name` on the same span MUST
-identify the target agent receiving the delegation or handoff, not the source
-agent that owns the span.
+When this attribute is present, `gen_ai.agent.name` on the same span or metric MUST
+identify the target agent receiving the delegation or handoff, not the agent that
+initiated it.
 
 **[5] `gen_ai.tool.description`:**
 

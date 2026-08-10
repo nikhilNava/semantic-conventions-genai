@@ -483,11 +483,6 @@ spans:
     note: |
       The `gen_ai.operation.name` SHOULD be `invoke_agent`.
 
-      This is a caller-owned operation span. `gen_ai.agent.*` attributes on this span
-      identify the **target agent** that is being invoked, not the agent that owns the span.
-      The target agent's own execution may be represented by a separate `invoke_agent` span;
-      that execution span MUST NOT carry `gen_ai.agent.interaction.type`.
-
       Examples: OpenAI Assistants API, AWS Bedrock Agents.
     stability: development
     attributes:
@@ -517,9 +512,6 @@ spans:
         brief: The version of the invoked GenAI agent.
         requirement_level:
           conditionally_required: When available.
-      - ref: gen_ai.agent.interaction.type
-        requirement_level:
-          conditionally_required: When the instrumented framework or protocol explicitly distinguishes the operation as a delegation or handoff to another agent.
 
   - type: gen_ai.invoke_agent.internal
     requirement_level: recommended
@@ -534,11 +526,6 @@ spans:
     note: |
       The `gen_ai.operation.name` SHOULD be `invoke_agent`.
 
-      This is a caller-owned operation span. `gen_ai.agent.*` attributes on this span
-      identify the **target agent** that is being invoked, not the agent that owns the span.
-      The target agent's own execution may be represented by a separate `invoke_agent` span;
-      that execution span MUST NOT carry `gen_ai.agent.interaction.type`.
-
       Examples: LangChain agents, CrewAI agents.
     stability: development
     attributes:
@@ -549,9 +536,6 @@ spans:
         sampling_relevant: true
       - ref: gen_ai.agent.name
         sampling_relevant: true
-      - ref: gen_ai.agent.interaction.type
-        requirement_level:
-          conditionally_required: When the instrumented framework or protocol explicitly distinguishes the operation as a delegation or handoff to another agent.
 
   - type: gen_ai.execute_tool.internal
     requirement_level: recommended
@@ -573,14 +557,12 @@ spans:
       own code and to manually instrument any tool calls that automatic
       instrumentations do not cover.
 
-      When a tool call is itself a tool-mediated agent-directed operation (for example,
-      a tool whose sole purpose is to invoke or hand off to another agent), and the
-      instrumented framework or protocol explicitly classifies the call as a delegation
-      or handoff, `gen_ai.agent.interaction.type` SHOULD be recorded on this span.
-      When `gen_ai.agent.interaction.type` is present, `gen_ai.agent.name` on this span
+      Some tool calls are themselves agent-directed operations: the tool exists to
+      invoke or hand off to another agent. On those, `gen_ai.agent.interaction.type`
+      records how the framework or protocol classifies the call, and `gen_ai.agent.name`
       MUST identify the target agent receiving the delegation or handoff. On ordinary
-      `execute_tool` spans without `gen_ai.agent.interaction.type`, `gen_ai.agent.name`
-      retains its default meaning: the agent that owns or is executing the tool operation.
+      `execute_tool` spans, which do not carry `gen_ai.agent.interaction.type`,
+      `gen_ai.agent.name` retains its default meaning: the agent executing the tool.
       The target agent's own execution MUST NOT carry `gen_ai.agent.interaction.type`.
     stability: development
     attributes:

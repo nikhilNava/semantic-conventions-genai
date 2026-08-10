@@ -76,13 +76,13 @@
 **[1] `gen_ai.agent.id`:** For hosted agents, this SHOULD be the provider-assigned stable identifier of the agent resource such as [AWS Bedrock agent ARN](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent_Agent.html) or [GCP Agent Registry identifier](https://docs.cloud.google.com/agent-registry/concepts#agent-identifier).
 It's NOT RECOMMENDED to record in-memory agent instance ids on this attribute due to their transient nature.
 
-**[2] `gen_ai.agent.interaction.type`:** This attribute applies to the caller-owned operation that directs work to
-another agent. It MUST NOT be inferred from span hierarchy or recorded on
-the target agent execution span.
+**[2] `gen_ai.agent.interaction.type`:** This attribute applies to the tool call that directs work to another agent: a tool
+that exists to invoke or hand off to that agent. It MUST NOT be inferred from span
+hierarchy or recorded on the target agent's own execution span.
 
-When this attribute is present, `gen_ai.agent.name` on the same span MUST
-identify the target agent receiving the delegation or handoff, not the source
-agent that owns the span.
+When this attribute is present, `gen_ai.agent.name` on the same span or metric MUST
+identify the target agent receiving the delegation or handoff, not the agent that
+initiated it.
 
 **[3] `gen_ai.conversation.compacted`:** This attribute is a positive indicator of context compaction. Instrumentations
 SHOULD set it to `true` only when they can reliably determine that context

@@ -396,13 +396,13 @@ attributes:
           stability: development
     brief: The explicitly observed interaction type between two GenAI agents.
     note: |
-      This attribute applies to the caller-owned operation that directs work to
-      another agent. It MUST NOT be inferred from span hierarchy or recorded on
-      the target agent execution span.
+      This attribute applies to the tool call that directs work to another agent: a tool
+      that exists to invoke or hand off to that agent. It MUST NOT be inferred from span
+      hierarchy or recorded on the target agent's own execution span.
 
-      When this attribute is present, `gen_ai.agent.name` on the same span MUST
-      identify the target agent receiving the delegation or handoff, not the source
-      agent that owns the span.
+      When this attribute is present, `gen_ai.agent.name` on the same span or metric MUST
+      identify the target agent receiving the delegation or handoff, not the agent that
+      initiated it.
     stability: development
   - key: gen_ai.tool.name
     type: string

@@ -1148,13 +1148,13 @@ Instrumentations SHOULD document the list of errors they report.
 
 **[2] `gen_ai.agent.interaction.type`:** When the instrumented framework or protocol explicitly distinguishes the tool call as a delegation or handoff to another agent.
 
-**[3] `gen_ai.agent.interaction.type`:** This attribute applies to the caller-owned operation that directs work to
-another agent. It MUST NOT be inferred from span hierarchy or recorded on
-the target agent execution span.
+**[3] `gen_ai.agent.interaction.type`:** This attribute applies to the tool call that directs work to another agent: a tool
+that exists to invoke or hand off to that agent. It MUST NOT be inferred from span
+hierarchy or recorded on the target agent's own execution span.
 
-When this attribute is present, `gen_ai.agent.name` on the same span MUST
-identify the target agent receiving the delegation or handoff, not the source
-agent that owns the span.
+When this attribute is present, `gen_ai.agent.name` on the same span or metric MUST
+identify the target agent receiving the delegation or handoff, not the agent that
+initiated it.
 
 **[4] `gen_ai.tool.type`:** Extension: A tool executed on the agent-side to directly call external APIs, bridging the gap between the agent and real-world systems.
   Agent-side operations involve actions that are performed by the agent on the server or within the agent's controlled environment.
