@@ -10,6 +10,7 @@ import json
 import os
 import time
 
+from opentelemetry import context as _context
 from opentelemetry import trace as _trace
 from reference_shared import flush_and_shutdown, reference_meter, reference_tracer, setup_otel
 
@@ -18,9 +19,12 @@ MOCK_BASE_URL = os.environ["MOCK_LLM_URL"] + "/v1"
 _reference_tracer = reference_tracer()
 _reference_meter = reference_meter()
 
-# `gen_ai.execute_tool.duration` carries `gen_ai.agent.interaction.type` when the
-# tool call is a delegation/handoff to another agent; `gen_ai.agent.name` then
-# identifies the target agent (see model/gen-ai/metrics.yaml).
+# `gen_ai.execute_tool.duration` is recorded once per tool execution this scenario
+# instruments, next to that execution's `execute_tool` span. It carries
+# `gen_ai.agent.interaction.type` when the tool call is a delegation/handoff to
+# another agent, and `gen_ai.agent.name` then identifies the target agent; for an
+# ordinary tool call there is no interaction type and `gen_ai.agent.name` is the
+# agent executing the tool (see model/gen-ai/metrics.yaml).
 _execute_tool_duration = _reference_meter.create_histogram(
     "gen_ai.execute_tool.duration",
     unit="s",
@@ -29,7 +33,7 @@ _execute_tool_duration = _reference_meter.create_histogram(
 
 
 @contextlib.contextmanager
-def _invoke_agent_execution_spans(*, request_model, input_text):
+def _invoke_agent_execution_spans(*, request_model, input_text, handoff_parent_context):
     """Bound each *logical* agent execution inside one public ``Runner.run`` with a
     single ``invoke_agent <agent.name>`` span, then restore the patched seam on exit.
 
@@ -42,6 +46,13 @@ def _invoke_agent_execution_spans(*, request_model, input_text):
     a private seam is allowed; the scenario's entry point stays the public
     ``Runner.run`` and this seam is never called directly.
 
+    Every execution of one ``Runner.run`` belongs to a single trace. ``handoff_parent_context``
+    is the per-run holder the transfer seam fills with the ``execute_tool
+    transfer_to_<agent>`` span context: consuming it parents the target agent's
+    execution directly to the handoff operation that caused it. When the active
+    agent changes for any other reason, the fallback is this run's own context,
+    so the executions still share one trace instead of starting a new one.
+
     ``input_text`` is the user's message, which is the input to the first (source)
     execution only. Each executing agent's own response goes on its own span, and no
     execution span carries ``gen_ai.agent.interaction.type`` -- that is caller-owned
@@ -50,7 +61,11 @@ def _invoke_agent_execution_spans(*, request_model, input_text):
     import agents.run
 
     original_run_single_turn = agents.run.run_single_turn
-    execution = {"span": None, "agent_name": None, "started": False}
+    # `run_context` starts as the context this `Runner.run` is entered with and is
+    # upgraded to the first execution span below, so it is a stable, non-empty
+    # parent for the rest of the run. It lives in this generator call, so one run
+    # never inherits the context of another.
+    execution = {"span": None, "agent_name": None, "started": False, "run_context": _context.get_current()}
 
     async def _traced_run_single_turn(**kwargs):
         executing_agent = kwargs["bindings"].public_agent
@@ -62,11 +77,22 @@ def _invoke_agent_execution_spans(*, request_model, input_text):
                 "gen_ai.request.model": request_model,
                 "gen_ai.agent.name": executing_agent.name,
             }
+            # A handoff caused this switch, so the target's execution is parented to
+            # the `execute_tool transfer_to_<agent>` operation that handed the work
+            # over -- consumed once, since each transfer causes one switch.
+            parent_context = handoff_parent_context.pop("context", None)
+            if parent_context is None:
+                parent_context = execution["run_context"]
             agent_span = _reference_tracer.start_span(
-                f"invoke_agent {executing_agent.name}", attributes=agent_span_attributes
+                f"invoke_agent {executing_agent.name}",
+                context=parent_context,
+                attributes=agent_span_attributes,
             )
-            # The user's message is the input to the first (source) execution only.
             if not execution["started"]:
+                # The first execution roots this run's trace, so later executions
+                # fall back to it and stay in the same trace.
+                execution["run_context"] = _trace.set_span_in_context(agent_span, execution["run_context"])
+                # The user's message is the input to the first (source) execution only.
                 agent_span.set_attribute(
                     "gen_ai.input.messages",
                     json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}]),
@@ -127,17 +153,29 @@ async def run_agent():
             "gen_ai.tool.name": "get_weather",
             "gen_ai.tool.type": "function",
         }
-        with _reference_tracer.start_as_current_span(
-            "execute_tool get_weather", attributes=tool_span_attributes
-        ) as tool_span:
-            tool_span.set_attribute("gen_ai.tool.description", get_weather.description)
-            if ctx.agent is not None and ctx.agent.name:
-                tool_span.set_attribute("gen_ai.agent.name", ctx.agent.name)
-            tool_span.set_attribute("gen_ai.tool.call.id", ctx.tool_call_id)
-            tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps({"location": location}))
-            result = "Sunny, 72°F"
-            tool_span.set_attribute("gen_ai.tool.call.result", result)
-            return result
+        # The agent executing the tool, known before the call: the span attribute
+        # and the duration metric below both report it. An ordinary tool call is
+        # not an agent interaction, so neither carries an interaction type.
+        executing_agent_name = ctx.agent.name if ctx.agent is not None else None
+        duration_attributes = {"gen_ai.tool.name": "get_weather", "gen_ai.tool.type": "function"}
+        if executing_agent_name:
+            duration_attributes["gen_ai.agent.name"] = executing_agent_name
+        start = time.perf_counter()
+        try:
+            with _reference_tracer.start_as_current_span(
+                "execute_tool get_weather", attributes=tool_span_attributes
+            ) as tool_span:
+                tool_span.set_attribute("gen_ai.tool.description", get_weather.description)
+                if executing_agent_name:
+                    tool_span.set_attribute("gen_ai.agent.name", executing_agent_name)
+                tool_span.set_attribute("gen_ai.tool.call.id", ctx.tool_call_id)
+                tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps({"location": location}))
+                result = "Sunny, 72°F"
+                tool_span.set_attribute("gen_ai.tool.call.result", result)
+                return result
+        finally:
+            # Record in `finally` so a failed tool execution is still timed.
+            _execute_tool_duration.record(time.perf_counter() - start, duration_attributes)
 
     client = openai.AsyncOpenAI(base_url=MOCK_BASE_URL, api_key="mock-key")
     request_model = "gpt-4o-mini"
@@ -382,7 +420,9 @@ async def run_agent_handoff():
     * `invoke_agent billing-agent` bounds the target agent's whole execution
       after the switch and carries that agent's response. Being the target's own
       execution, it must stay free of the interaction attribute -- the
-      interaction type is caller-owned.
+      interaction type is caller-owned. It is parented to the
+      `execute_tool transfer_to_billing_agent` operation that caused it, so the
+      whole run -- source execution, transfer, target execution -- is one trace.
 
     The SDK has no public per-execution boundary, so `_invoke_agent_execution_spans`
     derives it from the active agent changing across the private `run_single_turn`
@@ -402,6 +442,12 @@ async def run_agent_handoff():
         model=model,
     )
     billing_handoff = handoff(billing_agent)
+
+    # Per-run holder for the transfer's span context: the seam below fills it in
+    # when the model calls `transfer_to_billing_agent`, and the execution-span seam
+    # consumes it as the parent of the target agent's execution. Created per run,
+    # so no context leaks into the next `Runner.run`.
+    handoff_parent_context = {}
 
     # Wrap the handoff's public invoker to open the caller-owned execute_tool span
     # around the real transfer. The entry point stays `Runner.run`; the patched
@@ -423,6 +469,10 @@ async def run_agent_handoff():
                 # the call, and the target is `Handoff.agent_name`.
                 tool_span.set_attribute("gen_ai.agent.interaction.type", "handoff")
                 tool_span.set_attribute("gen_ai.agent.name", billing_handoff.agent_name)
+                # This transfer is what causes the target agent to execute, so its
+                # span context is handed to the execution-span seam to parent the
+                # target's execution -- one trace, one causal chain.
+                handoff_parent_context["context"] = _trace.set_span_in_context(tool_span)
                 target_agent = await original_on_invoke_handoff(run_context, input_json)
             return target_agent
         finally:
@@ -453,11 +503,16 @@ async def run_agent_handoff():
     # per-execution boundary that gives the source (triage) and the target (billing)
     # one span each. The target's response lands on the target span, which carries no
     # interaction type; the transfer stays the `execute_tool transfer_to_billing_agent`
-    # op wrapped above, a child of the triage span. The entry point stays the public
+    # op wrapped above, a child of the triage span, and parents the target execution
+    # so the whole run is one trace. The entry point stays the public
     # `Runner.run(triage_agent, ...)`.
     with (
         _patched_method(billing_handoff, "on_invoke_handoff", _traced_on_invoke_handoff),
-        _invoke_agent_execution_spans(request_model=request_model, input_text=input_text),
+        _invoke_agent_execution_spans(
+            request_model=request_model,
+            input_text=input_text,
+            handoff_parent_context=handoff_parent_context,
+        ),
     ):
         result = await Runner.run(triage_agent, input_text)
     print(f"    -> {str(result.final_output)[:60]}")
