@@ -434,42 +434,48 @@ def run_multi_agent_delegation_reference():
                 "gen_ai.tool.type": "function",
             }
             start = time.perf_counter()
-            with _reference_tracer.start_as_current_span(
-                f"execute_tool {agent_tool.name}", attributes=tool_span_attributes
-            ) as tool_span:
-                # `direct`: AgentTool is an agent-as-tool delegation API, so the
-                # type is intrinsic to the call; the target is the wrapped agent.
-                tool_span.set_attribute("gen_ai.agent.interaction.type", "delegation")
-                tool_span.set_attribute("gen_ai.agent.name", specialist.name)
-                if tool_context.function_call_id:
-                    tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
-                tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps(args))
-                # Child invoke_agent span: the target's own execution, identified
-                # only by its name and with no interaction type.
-                sub_agent_span_attributes = {
-                    "gen_ai.operation.name": "invoke_agent",
-                    "gen_ai.request.model": request_model,
-                    "gen_ai.agent.name": specialist.name,
-                }
+            try:
                 with _reference_tracer.start_as_current_span(
-                    f"invoke_agent {specialist.name}", attributes=sub_agent_span_attributes
-                ) as sub_agent_span:
-                    result = await original_run_async(args=args, tool_context=tool_context)
-                    sub_agent_span.set_attribute(
-                        "gen_ai.output.messages",
-                        json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(result)}]}]),
-                    )
-                tool_span.set_attribute("gen_ai.tool.call.result", str(result))
-            _execute_tool_duration.record(
-                time.perf_counter() - start,
-                {
-                    "gen_ai.tool.name": agent_tool.name,
-                    "gen_ai.tool.type": "function",
-                    "gen_ai.agent.interaction.type": "delegation",
-                    "gen_ai.agent.name": specialist.name,
-                },
-            )
-            return result
+                    f"execute_tool {agent_tool.name}", attributes=tool_span_attributes
+                ) as tool_span:
+                    # `direct`: AgentTool is an agent-as-tool delegation API, so the
+                    # type is intrinsic to the call; the target is the wrapped agent.
+                    tool_span.set_attribute("gen_ai.agent.interaction.type", "delegation")
+                    tool_span.set_attribute("gen_ai.agent.name", specialist.name)
+                    if tool_context.function_call_id:
+                        tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
+                    tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps(args))
+                    # Child invoke_agent span: the target's own execution, identified
+                    # only by its name and with no interaction type.
+                    sub_agent_span_attributes = {
+                        "gen_ai.operation.name": "invoke_agent",
+                        "gen_ai.request.model": request_model,
+                        "gen_ai.agent.name": specialist.name,
+                    }
+                    with _reference_tracer.start_as_current_span(
+                        f"invoke_agent {specialist.name}", attributes=sub_agent_span_attributes
+                    ) as sub_agent_span:
+                        result = await original_run_async(args=args, tool_context=tool_context)
+                        # Success-only response attributes: set after the call
+                        # returns so a failure never manufactures them.
+                        sub_agent_span.set_attribute(
+                            "gen_ai.output.messages",
+                            json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(result)}]}]),
+                        )
+                    tool_span.set_attribute("gen_ai.tool.call.result", str(result))
+                return result
+            finally:
+                # Record in `finally` so a failed delegation is still timed. Every
+                # dimension is the operation's target identity, known before the call.
+                _execute_tool_duration.record(
+                    time.perf_counter() - start,
+                    {
+                        "gen_ai.tool.name": agent_tool.name,
+                        "gen_ai.tool.type": "function",
+                        "gen_ai.agent.interaction.type": "delegation",
+                        "gen_ai.agent.name": specialist.name,
+                    },
+                )
 
         agent_tool.run_async = _traced_run_async
 

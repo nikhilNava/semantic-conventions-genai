@@ -176,27 +176,33 @@ async def run_agent_as_tool_delegation():
             "gen_ai.tool.type": "function",
         }
         start = time.perf_counter()
-        with _reference_tracer.start_as_current_span(
-            f"execute_tool {weather_tool.name}", attributes=tool_span_attributes
-        ) as tool_span:
-            # `direct`: `as_tool()` is an agent-as-tool delegation API, so the type
-            # is intrinsic to the call, and the target is the wrapped agent's name.
-            tool_span.set_attribute("gen_ai.agent.interaction.type", "delegation")
-            tool_span.set_attribute("gen_ai.agent.name", specialist.name)
-            tool_span.set_attribute("gen_ai.tool.call.id", tool_context.tool_call_id)
-            tool_span.set_attribute("gen_ai.tool.call.arguments", input_json)
-            result = await original_on_invoke_tool(tool_context, input_json)
-            tool_span.set_attribute("gen_ai.tool.call.result", str(result))
-        _execute_tool_duration.record(
-            time.perf_counter() - start,
-            {
-                "gen_ai.tool.name": weather_tool.name,
-                "gen_ai.tool.type": "function",
-                "gen_ai.agent.interaction.type": "delegation",
-                "gen_ai.agent.name": specialist.name,
-            },
-        )
-        return result
+        try:
+            with _reference_tracer.start_as_current_span(
+                f"execute_tool {weather_tool.name}", attributes=tool_span_attributes
+            ) as tool_span:
+                # `direct`: `as_tool()` is an agent-as-tool delegation API, so the type
+                # is intrinsic to the call, and the target is the wrapped agent's name.
+                tool_span.set_attribute("gen_ai.agent.interaction.type", "delegation")
+                tool_span.set_attribute("gen_ai.agent.name", specialist.name)
+                tool_span.set_attribute("gen_ai.tool.call.id", tool_context.tool_call_id)
+                tool_span.set_attribute("gen_ai.tool.call.arguments", input_json)
+                result = await original_on_invoke_tool(tool_context, input_json)
+                # Success-only: set the result only after the call returns, so a
+                # failure never manufactures a fabricated result attribute.
+                tool_span.set_attribute("gen_ai.tool.call.result", str(result))
+            return result
+        finally:
+            # Record in `finally` so a failed delegation is still timed. Every
+            # dimension is the operation's target identity, known before the call.
+            _execute_tool_duration.record(
+                time.perf_counter() - start,
+                {
+                    "gen_ai.tool.name": weather_tool.name,
+                    "gen_ai.tool.type": "function",
+                    "gen_ai.agent.interaction.type": "delegation",
+                    "gen_ai.agent.name": specialist.name,
+                },
+            )
 
     weather_tool.on_invoke_tool = _traced_on_invoke_tool
 
@@ -236,11 +242,26 @@ async def run_agent_handoff():
     `handoff()` is the SDK's explicit handoff API. The model calls the generated
     `transfer_to_<agent>` tool and the SDK switches the active agent, which then
     owns the remaining work -- a `handoff` interaction, mapped directly from the
-    API being invoked. The caller-owned `execute_tool` span carries
-    `gen_ai.agent.interaction.type` and names the target from `Handoff.agent_name`;
-    the target agent's own execution span (not emitted here) must stay free of the
-    interaction attribute.
+    API being invoked.
+
+    Two agents really execute under one public `Runner.run(triage_agent, ...)`
+    call, so two `invoke_agent` spans are emitted:
+
+    * the caller/source `invoke_agent triage-agent` span, which bounds the triage
+      agent's own turn and (as its child) the immediate
+      `execute_tool transfer_to_billing_agent` operation. That execute_tool span
+      carries `gen_ai.agent.interaction.type=handoff` and names the target from
+      `Handoff.agent_name`.
+    * the target `invoke_agent billing-agent` span, which bounds the billing
+      agent's real execution after the switch and carries that agent's response.
+      Being the target's own execution, it must stay free of the interaction
+      attribute -- the interaction type is caller-owned.
+
+    Each agent turn runs through the SDK's private `run_single_turn`; wrapping
+    that seam opens the per-agent span around the real execution while the
+    scenario's entry point stays the public `Runner.run`.
     """
+    import agents.run
     import openai
     from agents import Agent, Runner, handoff
     from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
@@ -267,24 +288,29 @@ async def run_agent_handoff():
             "gen_ai.tool.type": "function",
         }
         start = time.perf_counter()
-        with _reference_tracer.start_as_current_span(
-            f"execute_tool {billing_handoff.tool_name}", attributes=tool_span_attributes
-        ) as tool_span:
-            # `direct`: `handoff()` is a handoff API, so the type is intrinsic to
-            # the call, and the target is `Handoff.agent_name`.
-            tool_span.set_attribute("gen_ai.agent.interaction.type", "handoff")
-            tool_span.set_attribute("gen_ai.agent.name", billing_handoff.agent_name)
-            target_agent = await original_on_invoke_handoff(run_context, input_json)
-        _execute_tool_duration.record(
-            time.perf_counter() - start,
-            {
-                "gen_ai.tool.name": billing_handoff.tool_name,
-                "gen_ai.tool.type": "function",
-                "gen_ai.agent.interaction.type": "handoff",
-                "gen_ai.agent.name": billing_handoff.agent_name,
-            },
-        )
-        return target_agent
+        try:
+            with _reference_tracer.start_as_current_span(
+                f"execute_tool {billing_handoff.tool_name}", attributes=tool_span_attributes
+            ) as tool_span:
+                # `direct`: `handoff()` is a handoff API, so the type is intrinsic to
+                # the call, and the target is `Handoff.agent_name`.
+                tool_span.set_attribute("gen_ai.agent.interaction.type", "handoff")
+                tool_span.set_attribute("gen_ai.agent.name", billing_handoff.agent_name)
+                target_agent = await original_on_invoke_handoff(run_context, input_json)
+            return target_agent
+        finally:
+            # Record in `finally` so a failed transfer is still timed. Every
+            # dimension is the operation's target identity, known before the call,
+            # so no success-only result is manufactured on failure.
+            _execute_tool_duration.record(
+                time.perf_counter() - start,
+                {
+                    "gen_ai.tool.name": billing_handoff.tool_name,
+                    "gen_ai.tool.type": "function",
+                    "gen_ai.agent.interaction.type": "handoff",
+                    "gen_ai.agent.name": billing_handoff.agent_name,
+                },
+            )
 
     billing_handoff.on_invoke_handoff = _traced_on_invoke_handoff
 
@@ -296,26 +322,48 @@ async def run_agent_handoff():
     )
     input_text = "I have a question about my bill."
 
+    # Wrap the SDK's private per-turn function so each agent execution gets its
+    # own caller-owned `invoke_agent <agent.name>` span. The public entry point
+    # stays `Runner.run(triage_agent, ...)`; only this seam is instrumented.
+    original_run_single_turn = agents.run.run_single_turn
+    first_turn_seen = {"value": False}
+
+    async def _traced_run_single_turn(**kwargs):
+        executing_agent = kwargs["bindings"].public_agent
+        agent_span_attributes = {
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.request.model": request_model,
+            "gen_ai.agent.name": executing_agent.name,
+        }
+        with _reference_tracer.start_as_current_span(
+            f"invoke_agent {executing_agent.name}", attributes=agent_span_attributes
+        ) as agent_span:
+            # The user's message is the input to the first (source) execution only.
+            if not first_turn_seen["value"]:
+                first_turn_seen["value"] = True
+                agent_span.set_attribute(
+                    "gen_ai.input.messages",
+                    json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}]),
+                )
+            turn_result = await original_run_single_turn(**kwargs)
+            # Only a final-output step exposes `.output`; a handoff step exposes
+            # `.new_agent` instead. The executing agent's own response -- the
+            # billing agent's here -- goes on that agent's span, not the caller's.
+            next_step = turn_result.next_step
+            if hasattr(next_step, "output"):
+                agent_span.set_attribute(
+                    "gen_ai.output.messages",
+                    json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(next_step.output)}]}]),
+                )
+            return turn_result
+
     print("  [handoff] native handoff via handoff() (reference implementation)")
-    agent_span_attributes = {
-        "gen_ai.operation.name": "invoke_agent",
-        "gen_ai.request.model": request_model,
-        "gen_ai.agent.name": triage_agent.name,
-    }
-    with _reference_tracer.start_as_current_span(
-        "invoke_agent triage-agent", attributes=agent_span_attributes
-    ) as agent_span:
-        agent_span.set_attribute(
-            "gen_ai.input.messages",
-            json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}]),
-        )
+    agents.run.run_single_turn = _traced_run_single_turn
+    try:
         result = await Runner.run(triage_agent, input_text)
-        if result.final_output:
-            agent_span.set_attribute(
-                "gen_ai.output.messages",
-                json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(result.final_output)}]}]),
-            )
-        print(f"    -> {str(result.final_output)[:60]}")
+    finally:
+        agents.run.run_single_turn = original_run_single_turn
+    print(f"    -> {str(result.final_output)[:60]}")
 
 
 def main():
