@@ -40,6 +40,22 @@ _execute_tool_duration = _reference_meter.create_histogram(
 )
 
 
+@contextlib.contextmanager
+def _patched_method(obj, name, replacement):
+    """Temporarily replace the ``obj.name`` bound method with ``replacement`` as
+    an instrumentation seam, always restoring the original in ``finally`` --
+    including on exceptions. Repo rules allow patching a public or private method
+    as a seam as long as the scenario still enters through the library's public
+    API; this helper just guarantees the patch is symmetric.
+    """
+    original = getattr(obj, name)
+    setattr(obj, name, replacement)
+    try:
+        yield
+    finally:
+        setattr(obj, name, original)
+
+
 class SpanCounter(SpanProcessor):
     """Lightweight span counter for diagnosing whether instrumentation fires."""
 
@@ -424,7 +440,8 @@ def run_multi_agent_delegation_reference():
 
         # Wrap the tool's public run_async to open the caller-owned execute_tool
         # span around the real sub-agent invocation. The entry point stays
-        # runner.run_async; only this seam is instrumented.
+        # runner.run_async; the patched method is installed and restored in
+        # `finally` by `_patched_method` below.
         original_run_async = agent_tool.run_async
 
         async def _traced_run_async(*, args, tool_context):
@@ -477,8 +494,6 @@ def run_multi_agent_delegation_reference():
                     },
                 )
 
-        agent_tool.run_async = _traced_run_async
-
         root_agent = Agent(
             name="root_agent",
             description="Routes questions to specialist agents.",
@@ -521,7 +536,10 @@ def run_multi_agent_delegation_reference():
                     )
                     print(f"    -> {last_text[:60]}")
 
-        asyncio.run(_run())
+        # `_patched_method` installs the caller-owned execute_tool run_async seam
+        # and restores it in `finally`. The entry point stays runner.run_async.
+        with _patched_method(agent_tool, "run_async", _traced_run_async):
+            asyncio.run(_run())
 
 
 def main():

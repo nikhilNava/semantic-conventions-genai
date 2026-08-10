@@ -88,6 +88,22 @@ def _invoke_agent_span_per_turn(*, request_model, first_input_text=None):
         agents.run.run_single_turn = original_run_single_turn
 
 
+@contextlib.contextmanager
+def _patched_method(obj, name, replacement):
+    """Temporarily replace the ``obj.name`` bound method with ``replacement`` as
+    an instrumentation seam, always restoring the original in ``finally`` --
+    including on exceptions. Repo rules allow patching a public or private method
+    as a seam as long as the scenario still enters through the library's public
+    API; this helper just guarantees the patch is symmetric.
+    """
+    original = getattr(obj, name)
+    setattr(obj, name, replacement)
+    try:
+        yield
+    finally:
+        setattr(obj, name, original)
+
+
 async def run_agent():
     """Run a simple agent with the OpenAI Agents SDK, with manual spans."""
     import openai
@@ -240,7 +256,8 @@ async def run_agent_as_tool_delegation():
     )
 
     # Wrap the tool's public invoker to open the caller-owned execute_tool span
-    # around the real sub-agent invocation. The entry point stays `Runner.run`.
+    # around the real sub-agent invocation. The entry point stays `Runner.run`;
+    # the patched invoker is restored in `finally` by `_patched_method` below.
     original_on_invoke_tool = weather_tool.on_invoke_tool
 
     async def _traced_on_invoke_tool(tool_context, input_json):
@@ -278,8 +295,6 @@ async def run_agent_as_tool_delegation():
                 },
             )
 
-    weather_tool.on_invoke_tool = _traced_on_invoke_tool
-
     caller = Agent(
         name="assistant",
         instructions="You are a helpful assistant. Delegate weather questions to the specialist.",
@@ -289,13 +304,18 @@ async def run_agent_as_tool_delegation():
     input_text = "What's the weather in Seattle?"
 
     print("  [delegation] agent-as-tool via Agent.as_tool (reference implementation)")
-    # The shared per-turn seam also wraps the nested `Agent.as_tool` `Runner.run`,
-    # so the delegated target `weather-specialist` gets its own
-    # `invoke_agent weather-specialist` span (child of the caller-owned
-    # `execute_tool weather-specialist` span above) carrying its response and no
-    # interaction type, while the caller's turns get their own `invoke_agent
-    # assistant` spans. The entry point stays the public `Runner.run(caller, ...)`.
-    with _invoke_agent_span_per_turn(request_model=request_model, first_input_text=input_text):
+    # `_patched_method` installs the caller-owned execute_tool invoker and restores
+    # it in `finally`. The shared per-turn seam also wraps the nested
+    # `Agent.as_tool` `Runner.run`, so the delegated target `weather-specialist`
+    # gets its own `invoke_agent weather-specialist` span (child of the
+    # caller-owned `execute_tool weather-specialist` span above) carrying its
+    # response and no interaction type, while the caller's turns get their own
+    # `invoke_agent assistant` spans. The entry point stays the public
+    # `Runner.run(caller, ...)`.
+    with (
+        _patched_method(weather_tool, "on_invoke_tool", _traced_on_invoke_tool),
+        _invoke_agent_span_per_turn(request_model=request_model, first_input_text=input_text),
+    ):
         result = await Runner.run(caller, input_text)
     print(f"    -> {str(result.final_output)[:60]}")
 
@@ -341,7 +361,8 @@ async def run_agent_handoff():
     billing_handoff = handoff(billing_agent)
 
     # Wrap the handoff's public invoker to open the caller-owned execute_tool span
-    # around the real transfer. The entry point stays `Runner.run`.
+    # around the real transfer. The entry point stays `Runner.run`; the patched
+    # invoker is installed and restored in `finally` by `_patched_method` below.
     original_on_invoke_handoff = billing_handoff.on_invoke_handoff
 
     async def _traced_on_invoke_handoff(run_context, input_json=None):
@@ -375,8 +396,6 @@ async def run_agent_handoff():
                 },
             )
 
-    billing_handoff.on_invoke_handoff = _traced_on_invoke_handoff
-
     triage_agent = Agent(
         name="triage-agent",
         instructions="You route the user to the correct specialist agent.",
@@ -386,12 +405,17 @@ async def run_agent_handoff():
     input_text = "I have a question about my bill."
 
     print("  [handoff] native handoff via handoff() (reference implementation)")
-    # The shared per-turn seam gives the source (triage) and the target (billing)
-    # each their own `invoke_agent` span: the target's response lands on the
-    # target span, which carries no interaction type. The immediate transfer stays
-    # the `execute_tool transfer_to_billing_agent` op wrapped above (a child of the
-    # triage span). The entry point stays the public `Runner.run(triage_agent, ...)`.
-    with _invoke_agent_span_per_turn(request_model=request_model, first_input_text=input_text):
+    # `_patched_method` installs the caller-owned transfer invoker and restores it
+    # in `finally`. The shared per-turn seam gives the source (triage) and the
+    # target (billing) each their own `invoke_agent` span: the target's response
+    # lands on the target span, which carries no interaction type. The immediate
+    # transfer stays the `execute_tool transfer_to_billing_agent` op wrapped above
+    # (a child of the triage span). The entry point stays the public
+    # `Runner.run(triage_agent, ...)`.
+    with (
+        _patched_method(billing_handoff, "on_invoke_handoff", _traced_on_invoke_handoff),
+        _invoke_agent_span_per_turn(request_model=request_model, first_input_text=input_text),
+    ):
         result = await Runner.run(triage_agent, input_text)
     print(f"    -> {str(result.final_output)[:60]}")
 
