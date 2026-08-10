@@ -130,7 +130,11 @@ attribute_groups:
         requirement_level:
           recommended: If available.
       - ref: gen_ai.agent.name
-        brief: The human-readable name of the agent executing the tool.
+        brief: >
+          When `gen_ai.agent.interaction.type` is present, identifies the target agent receiving
+          the delegation or handoff; otherwise identifies the agent executing the tool.
+          When this group is used on the duration metric (which does not carry interaction type),
+          the effective meaning is always the agent executing the tool.
         requirement_level:
           conditionally_required: When applicable.
 
