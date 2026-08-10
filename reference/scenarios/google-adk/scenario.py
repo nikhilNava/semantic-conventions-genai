@@ -30,9 +30,11 @@ _tool_calls = _reference_meter.create_histogram(
     unit="{tool_call}",
     description="The number of tool calls a GenAI agent makes during a single invocation.",
 )
-# `gen_ai.execute_tool.duration` carries `gen_ai.agent.interaction.type` when the
-# tool call is a delegation/handoff to another agent; `gen_ai.agent.name` then
-# identifies the target agent (see model/gen-ai/metrics.yaml).
+# `gen_ai.execute_tool.duration` is recorded once per tool execution this scenario
+# instruments, next to that execution's `execute_tool` span (ADK's own instrument for
+# the same metric is suppressed in `_suppress_adk_native_telemetry`). It carries
+# `gen_ai.agent.interaction.type` when the tool call is a delegation to another agent;
+# `gen_ai.agent.name` then identifies the target agent (see model/gen-ai/metrics.yaml).
 _execute_tool_duration = _reference_meter.create_histogram(
     "gen_ai.execute_tool.duration",
     unit="s",
@@ -122,10 +124,17 @@ def _suppress_adk_native_telemetry():
         # ADK records gen_ai.client.token.usage and gen_ai.client.operation.duration for the model
         # call it hands to google-genai, but only as a fallback for when no model-client
         # instrumentation is loaded (see tracing._should_emit_native_telemetry). That call belongs
-        # to google-genai, so drop those two instruments. Every other ADK instrument is left alone,
-        # including the invoke_agent inference/tool call counts, which describe ADK's own work.
+        # to google-genai, so drop those two instruments.
         patch_attribute(adk_metrics, "_client_operation_duration", disabled_instrument)
         patch_attribute(adk_metrics, "_client_token_usage", disabled_instrument)
+        # ADK also records gen_ai.execute_tool.duration for every tool call, always dimensioned by
+        # the calling agent and by the tool's Python class name. This scenario emits that metric
+        # itself next to each execute_tool span, so leaving ADK's instrument on would double-count
+        # every tool execution and, for AgentTool, disagree with the reference point on both
+        # gen_ai.agent.name and gen_ai.tool.type. Drop it and record one point per operation below.
+        patch_attribute(adk_metrics, "_tool_execution_duration", disabled_instrument)
+        # Every other ADK instrument is left alone, including the invoke_agent inference/tool call
+        # counts and invoke_agent duration, which describe ADK's own work.
         yield
     finally:
         for owner, name, value in reversed(previous_attributes):
@@ -168,17 +177,31 @@ def run_agent_reference():
             "gen_ai.tool.name": "get_weather",
             "gen_ai.tool.type": "function",
         }
-        with _reference_tracer.start_as_current_span(
-            "execute_tool get_weather", attributes=tool_span_attributes
-        ) as tool_span:
-            tool_span.set_attribute("gen_ai.tool.description", "Get the current weather.")
-            tool_span.set_attribute("gen_ai.agent.name", tool_context.agent_name)
-            if tool_context.function_call_id:
-                tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
-            tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps({"location": location}))
-            result = f"Sunny in {location}"
-            tool_span.set_attribute("gen_ai.tool.call.result", result)
-        return result
+        start = time.perf_counter()
+        try:
+            with _reference_tracer.start_as_current_span(
+                "execute_tool get_weather", attributes=tool_span_attributes
+            ) as tool_span:
+                tool_span.set_attribute("gen_ai.tool.description", "Get the current weather.")
+                tool_span.set_attribute("gen_ai.agent.name", tool_context.agent_name)
+                if tool_context.function_call_id:
+                    tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
+                tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps({"location": location}))
+                result = f"Sunny in {location}"
+                tool_span.set_attribute("gen_ai.tool.call.result", result)
+            return result
+        finally:
+            # Record in `finally` so a failed tool call is still timed. This is an ordinary tool
+            # execution, so there is no interaction type and `gen_ai.agent.name` is the agent
+            # executing the tool -- the same value the span carries.
+            _execute_tool_duration.record(
+                time.perf_counter() - start,
+                {
+                    "gen_ai.tool.name": "get_weather",
+                    "gen_ai.tool.type": "function",
+                    "gen_ai.agent.name": tool_context.agent_name,
+                },
+            )
 
     tool_defs = [
         {
