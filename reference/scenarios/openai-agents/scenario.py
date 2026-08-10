@@ -5,6 +5,7 @@ handoff against a mock OpenAI server, with manual OTel spans.
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import time
@@ -24,6 +25,67 @@ _execute_tool_duration = _reference_meter.create_histogram(
     unit="s",
     description="The duration of a single tool execution.",
 )
+
+
+@contextlib.contextmanager
+def _invoke_agent_span_per_turn(*, request_model, first_input_text=None):
+    """Open one caller-owned ``invoke_agent <agent.name>`` span per real agent
+    execution, by wrapping the SDK's private per-turn ``run_single_turn``, then
+    restore it on exit.
+
+    This is the shared multi-agent seam used by both the native-handoff and the
+    agent-as-tool delegation scenarios. Patching this private function is
+    allowed; the scenario's entry point stays the public ``Runner.run``, and this
+    seam is never called directly. Because every agent turn -- including a nested
+    agent run started by ``Agent.as_tool``'s own ``Runner.run`` -- flows through
+    ``run_single_turn``, the wrapper also gives a delegated target agent its own
+    ``invoke_agent`` span, correctly nested under the caller-owned
+    ``execute_tool`` span that drove the delegation.
+
+    Each executing agent's own response goes on its span; the span carries no
+    ``gen_ai.agent.interaction.type`` -- that is caller-owned and set on the
+    ``execute_tool`` operation instead. ``first_input_text``, when given, is set
+    as ``gen_ai.input.messages`` on the first (source) execution only.
+    """
+    import agents.run
+
+    original_run_single_turn = agents.run.run_single_turn
+    state = {"first_turn": True}
+
+    async def _traced_run_single_turn(**kwargs):
+        executing_agent = kwargs["bindings"].public_agent
+        agent_span_attributes = {
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.request.model": request_model,
+            "gen_ai.agent.name": executing_agent.name,
+        }
+        with _reference_tracer.start_as_current_span(
+            f"invoke_agent {executing_agent.name}", attributes=agent_span_attributes
+        ) as agent_span:
+            # The user's message is the input to the first (source) execution only.
+            if first_input_text is not None and state["first_turn"]:
+                state["first_turn"] = False
+                agent_span.set_attribute(
+                    "gen_ai.input.messages",
+                    json.dumps([{"role": "user", "parts": [{"type": "text", "content": first_input_text}]}]),
+                )
+            turn_result = await original_run_single_turn(**kwargs)
+            # Only a final-output step exposes `.output` (a handoff step exposes
+            # `.new_agent`); the executing agent's own response goes on its span,
+            # never on the caller's.
+            next_step = turn_result.next_step
+            if hasattr(next_step, "output"):
+                agent_span.set_attribute(
+                    "gen_ai.output.messages",
+                    json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(next_step.output)}]}]),
+                )
+            return turn_result
+
+    agents.run.run_single_turn = _traced_run_single_turn
+    try:
+        yield
+    finally:
+        agents.run.run_single_turn = original_run_single_turn
 
 
 async def run_agent():
@@ -142,9 +204,21 @@ async def run_agent_as_tool_delegation():
     the target agent as a function tool and, per its docstring, "the conversation
     is continued by the original agent" -- the caller expects a result back. That
     is a `delegation` interaction, mapped directly from the API being invoked (not
-    inferred from the arguments). The caller-owned `execute_tool` span carries
-    `gen_ai.agent.interaction.type` and names the target agent; the target's own
-    model call belongs to the `openai` library, so no inference span is emitted here.
+    inferred from the arguments).
+
+    Two agents really execute under one public `Runner.run(caller, ...)` call
+    (the delegated agent runs through `Agent.as_tool`'s own nested `Runner.run`),
+    so the shared `_invoke_agent_span_per_turn` seam emits:
+
+    * the caller `invoke_agent assistant` span(s) for the caller's own turns, and
+    * the target `invoke_agent weather-specialist` span, nested under the
+      caller-owned `execute_tool weather-specialist` operation, carrying the
+      delegated agent's response. Being the target's own execution, it stays free
+      of `gen_ai.agent.interaction.type` -- that is caller-owned and lives on the
+      `execute_tool` span, which names the target.
+
+    The delegated agent's model call belongs to the `openai` library, so no
+    inference span is emitted here.
     """
     import openai
     from agents import Agent, Runner
@@ -215,25 +289,15 @@ async def run_agent_as_tool_delegation():
     input_text = "What's the weather in Seattle?"
 
     print("  [delegation] agent-as-tool via Agent.as_tool (reference implementation)")
-    agent_span_attributes = {
-        "gen_ai.operation.name": "invoke_agent",
-        "gen_ai.request.model": request_model,
-        "gen_ai.agent.name": caller.name,
-    }
-    with _reference_tracer.start_as_current_span(
-        "invoke_agent assistant", attributes=agent_span_attributes
-    ) as agent_span:
-        agent_span.set_attribute(
-            "gen_ai.input.messages",
-            json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}]),
-        )
+    # The shared per-turn seam also wraps the nested `Agent.as_tool` `Runner.run`,
+    # so the delegated target `weather-specialist` gets its own
+    # `invoke_agent weather-specialist` span (child of the caller-owned
+    # `execute_tool weather-specialist` span above) carrying its response and no
+    # interaction type, while the caller's turns get their own `invoke_agent
+    # assistant` spans. The entry point stays the public `Runner.run(caller, ...)`.
+    with _invoke_agent_span_per_turn(request_model=request_model, first_input_text=input_text):
         result = await Runner.run(caller, input_text)
-        if result.final_output:
-            agent_span.set_attribute(
-                "gen_ai.output.messages",
-                json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(result.final_output)}]}]),
-            )
-        print(f"    -> {str(result.final_output)[:60]}")
+    print(f"    -> {str(result.final_output)[:60]}")
 
 
 async def run_agent_handoff():
@@ -257,11 +321,10 @@ async def run_agent_handoff():
       Being the target's own execution, it must stay free of the interaction
       attribute -- the interaction type is caller-owned.
 
-    Each agent turn runs through the SDK's private `run_single_turn`; wrapping
-    that seam opens the per-agent span around the real execution while the
-    scenario's entry point stays the public `Runner.run`.
+    Each agent turn runs through the SDK's private `run_single_turn`; the shared
+    `_invoke_agent_span_per_turn` seam opens the per-agent span around the real
+    execution while the scenario's entry point stays the public `Runner.run`.
     """
-    import agents.run
     import openai
     from agents import Agent, Runner, handoff
     from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
@@ -322,47 +385,14 @@ async def run_agent_handoff():
     )
     input_text = "I have a question about my bill."
 
-    # Wrap the SDK's private per-turn function so each agent execution gets its
-    # own caller-owned `invoke_agent <agent.name>` span. The public entry point
-    # stays `Runner.run(triage_agent, ...)`; only this seam is instrumented.
-    original_run_single_turn = agents.run.run_single_turn
-    first_turn_seen = {"value": False}
-
-    async def _traced_run_single_turn(**kwargs):
-        executing_agent = kwargs["bindings"].public_agent
-        agent_span_attributes = {
-            "gen_ai.operation.name": "invoke_agent",
-            "gen_ai.request.model": request_model,
-            "gen_ai.agent.name": executing_agent.name,
-        }
-        with _reference_tracer.start_as_current_span(
-            f"invoke_agent {executing_agent.name}", attributes=agent_span_attributes
-        ) as agent_span:
-            # The user's message is the input to the first (source) execution only.
-            if not first_turn_seen["value"]:
-                first_turn_seen["value"] = True
-                agent_span.set_attribute(
-                    "gen_ai.input.messages",
-                    json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}]),
-                )
-            turn_result = await original_run_single_turn(**kwargs)
-            # Only a final-output step exposes `.output`; a handoff step exposes
-            # `.new_agent` instead. The executing agent's own response -- the
-            # billing agent's here -- goes on that agent's span, not the caller's.
-            next_step = turn_result.next_step
-            if hasattr(next_step, "output"):
-                agent_span.set_attribute(
-                    "gen_ai.output.messages",
-                    json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(next_step.output)}]}]),
-                )
-            return turn_result
-
     print("  [handoff] native handoff via handoff() (reference implementation)")
-    agents.run.run_single_turn = _traced_run_single_turn
-    try:
+    # The shared per-turn seam gives the source (triage) and the target (billing)
+    # each their own `invoke_agent` span: the target's response lands on the
+    # target span, which carries no interaction type. The immediate transfer stays
+    # the `execute_tool transfer_to_billing_agent` op wrapped above (a child of the
+    # triage span). The entry point stays the public `Runner.run(triage_agent, ...)`.
+    with _invoke_agent_span_per_turn(request_model=request_model, first_input_text=input_text):
         result = await Runner.run(triage_agent, input_text)
-    finally:
-        agents.run.run_single_turn = original_run_single_turn
     print(f"    -> {str(result.final_output)[:60]}")
 
 
