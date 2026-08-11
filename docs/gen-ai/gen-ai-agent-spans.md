@@ -535,6 +535,13 @@ Otherwise this span represents the execution of the agent it names and does not 
 `gen_ai.agent.interaction.type`. When the target agent's execution is represented by
 another `invoke_agent` span, that span MUST NOT carry `gen_ai.agent.interaction.type`.
 
+A framework operation dedicated to transferring work to another agent SHOULD be
+recorded as this operation, naming the target agent, and SHOULD NOT be recorded as a
+`gen_ai.execute_tool` operation, even when the model selects the transfer like a tool.
+For example, the OpenAI Agents SDK records a native handoff with its own handoff span
+naming the source and target agents, distinct from the spans it records for function
+tools.
+
 Examples: LangChain agents, CrewAI agents.
 
 **Span name** SHOULD be `invoke_agent {gen_ai.agent.name}` if `gen_ai.agent.name` is readily available.

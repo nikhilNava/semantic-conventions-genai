@@ -1087,6 +1087,10 @@ MUST identify the target agent receiving the delegation or handoff. On ordinary
 `gen_ai.agent.name` retains its default meaning: the agent executing the tool.
 The target agent's own execution MUST NOT carry `gen_ai.agent.interaction.type`.
 
+When the framework models the transfer as its own dedicated operation rather than as
+a tool execution, it is recorded as a `gen_ai.invoke_agent` operation instead; neither
+this span nor `gen_ai.execute_tool.duration` is recorded for it.
+
 **Span name** SHOULD be `execute_tool {gen_ai.tool.name}`.
 
 **Span kind** SHOULD be `INTERNAL`.
