@@ -21,10 +21,11 @@ _reference_meter = reference_meter()
 
 # `gen_ai.execute_tool.duration` is recorded once per tool execution this scenario
 # instruments, next to that execution's `execute_tool` span. It carries
-# `gen_ai.agent.interaction.type` when the tool call is a delegation/handoff to
+# `gen_ai.agent.interaction.type` when the tool call is itself a delegation to
 # another agent, and `gen_ai.agent.name` then identifies the target agent; for an
 # ordinary tool call there is no interaction type and `gen_ai.agent.name` is the
-# agent executing the tool (see model/gen-ai/metrics.yaml).
+# agent executing the tool (see model/gen-ai/metrics.yaml). The native handoff is
+# not a tool execution, so it records no point here.
 _execute_tool_duration = _reference_meter.create_histogram(
     "gen_ai.execute_tool.duration",
     unit="s",
@@ -47,8 +48,8 @@ def _invoke_agent_execution_spans(*, request_model, input_text, handoff_parent_c
     ``Runner.run`` and this seam is never called directly.
 
     Every execution of one ``Runner.run`` belongs to a single trace. ``handoff_parent_context``
-    is the per-run holder the transfer seam fills with the ``execute_tool
-    transfer_to_<agent>`` span context: consuming it parents the target agent's
+    is the per-run holder the transfer seam fills with the context of the caller-owned
+    ``invoke_agent <target>`` handoff span: consuming it parents the target agent's
     execution directly to the handoff operation that caused it. When the active
     agent changes for any other reason, the fallback is this run's own context,
     so the executions still share one trace instead of starting a new one.
@@ -56,7 +57,7 @@ def _invoke_agent_execution_spans(*, request_model, input_text, handoff_parent_c
     ``input_text`` is the user's message, which is the input to the first (source)
     execution only. Each executing agent's own response goes on its own span, and no
     execution span carries ``gen_ai.agent.interaction.type`` -- that is caller-owned
-    and belongs on the ``execute_tool`` operation that directed the work.
+    and belongs on the operation that directed the work.
     """
     import agents.run
 
@@ -78,8 +79,8 @@ def _invoke_agent_execution_spans(*, request_model, input_text, handoff_parent_c
                 "gen_ai.agent.name": executing_agent.name,
             }
             # A handoff caused this switch, so the target's execution is parented to
-            # the `execute_tool transfer_to_<agent>` operation that handed the work
-            # over -- consumed once, since each transfer causes one switch.
+            # the caller-owned `invoke_agent <target>` handoff operation that handed
+            # the work over -- consumed once, since each transfer causes one switch.
             parent_context = handoff_parent_context.pop("context", None)
             if parent_context is None:
                 parent_context = execution["run_context"]
@@ -404,25 +405,32 @@ async def run_agent_as_tool_delegation():
 async def run_agent_handoff():
     """Handoff: a caller agent transfers control to another agent via `handoff`.
 
-    `handoff()` is the SDK's explicit handoff API. The model calls the generated
-    `transfer_to_<agent>` tool and the SDK switches the active agent, which then
-    owns the remaining work -- a `handoff` interaction, mapped directly from the
-    API being invoked.
+    `handoff()` is the SDK's explicit handoff API, and it is *not* an ordinary tool
+    execution: the SDK gives it its own `Handoff` object and its own invoker
+    (`on_invoke_handoff`), whose whole purpose is to switch the active agent so the
+    target owns the remaining work. That dedicated boundary is a caller-owned
+    agent invocation, so it is modelled as an `invoke_agent` operation naming the
+    **target** agent, with `gen_ai.agent.interaction.type=handoff` mapped directly
+    from the API being invoked. The generated `transfer_to_<agent>` name the model
+    sees is a prompt-level artifact of that API, not a tool the agent executes, so
+    this operation emits no `gen_ai.tool.*` attributes and no
+    `gen_ai.execute_tool.duration` point.
 
     Two agents really execute under one public `Runner.run(triage_agent, ...)`
     call, and each logical execution gets exactly one span:
 
     * `invoke_agent triage-agent` bounds the source agent's whole execution
-      (every turn it takes before the switch) and owns the user's input. The
-      immediate `execute_tool transfer_to_billing_agent` operation is its child
-      and carries `gen_ai.agent.interaction.type=handoff` plus the target from
-      `Handoff.agent_name`.
-    * `invoke_agent billing-agent` bounds the target agent's whole execution
-      after the switch and carries that agent's response. Being the target's own
-      execution, it must stay free of the interaction attribute -- the
-      interaction type is caller-owned. It is parented to the
-      `execute_tool transfer_to_billing_agent` operation that caused it, so the
-      whole run -- source execution, transfer, target execution -- is one trace.
+      (every turn it takes before the switch) and owns the user's input.
+    * `invoke_agent billing-agent` (caller-owned) is its child: the transfer
+      itself, carrying `gen_ai.agent.interaction.type=handoff` and the target from
+      `Handoff.agent_name`. The seam exposes the target's identity before the call
+      but not its configuration, so this operation claims nothing else.
+    * `invoke_agent billing-agent` (the target's own execution) bounds the target
+      agent's whole execution after the switch and carries that agent's response.
+      Being the target's own execution, it must stay free of the interaction
+      attribute -- the interaction type is caller-owned. It is parented to the
+      caller-owned handoff span, so the whole run -- source execution, handoff,
+      target execution -- is one causally connected trace.
 
     The SDK has no public per-execution boundary, so `_invoke_agent_execution_spans`
     derives it from the active agent changing across the private `run_single_turn`
@@ -443,51 +451,34 @@ async def run_agent_handoff():
     )
     billing_handoff = handoff(billing_agent)
 
-    # Per-run holder for the transfer's span context: the seam below fills it in
+    # Per-run holder for the handoff's span context: the seam below fills it in
     # when the model calls `transfer_to_billing_agent`, and the execution-span seam
     # consumes it as the parent of the target agent's execution. Created per run,
     # so no context leaks into the next `Runner.run`.
     handoff_parent_context = {}
 
-    # Wrap the handoff's public invoker to open the caller-owned execute_tool span
+    # Wrap the handoff's public invoker to open the caller-owned invoke_agent span
     # around the real transfer. The entry point stays `Runner.run`; the patched
     # invoker is installed and restored in `finally` by `_patched_method` below.
     original_on_invoke_handoff = billing_handoff.on_invoke_handoff
 
     async def _traced_on_invoke_handoff(run_context, input_json=None):
-        tool_span_attributes = {
-            "gen_ai.operation.name": "execute_tool",
-            "gen_ai.tool.name": billing_handoff.tool_name,
-            "gen_ai.tool.type": "function",
+        # `direct`: this seam belongs to the SDK's dedicated handoff API, so the
+        # interaction type is intrinsic to the call, and the invoked agent is
+        # `Handoff.agent_name` -- both known before the transfer runs.
+        handoff_span_attributes = {
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.agent.name": billing_handoff.agent_name,
+            "gen_ai.agent.interaction.type": "handoff",
         }
-        start = time.perf_counter()
-        try:
-            with _reference_tracer.start_as_current_span(
-                f"execute_tool {billing_handoff.tool_name}", attributes=tool_span_attributes
-            ) as tool_span:
-                # `direct`: `handoff()` is a handoff API, so the type is intrinsic to
-                # the call, and the target is `Handoff.agent_name`.
-                tool_span.set_attribute("gen_ai.agent.interaction.type", "handoff")
-                tool_span.set_attribute("gen_ai.agent.name", billing_handoff.agent_name)
-                # This transfer is what causes the target agent to execute, so its
-                # span context is handed to the execution-span seam to parent the
-                # target's execution -- one trace, one causal chain.
-                handoff_parent_context["context"] = _trace.set_span_in_context(tool_span)
-                target_agent = await original_on_invoke_handoff(run_context, input_json)
-            return target_agent
-        finally:
-            # Record in `finally` so a failed transfer is still timed. Every
-            # dimension is the operation's target identity, known before the call,
-            # so no success-only result is manufactured on failure.
-            _execute_tool_duration.record(
-                time.perf_counter() - start,
-                {
-                    "gen_ai.tool.name": billing_handoff.tool_name,
-                    "gen_ai.tool.type": "function",
-                    "gen_ai.agent.interaction.type": "handoff",
-                    "gen_ai.agent.name": billing_handoff.agent_name,
-                },
-            )
+        with _reference_tracer.start_as_current_span(
+            f"invoke_agent {billing_handoff.agent_name}", attributes=handoff_span_attributes
+        ) as handoff_span:
+            # This transfer is what causes the target agent to execute, so its
+            # span context is handed to the execution-span seam to parent the
+            # target's execution -- one trace, one causal chain.
+            handoff_parent_context["context"] = _trace.set_span_in_context(handoff_span)
+            return await original_on_invoke_handoff(run_context, input_json)
 
     triage_agent = Agent(
         name="triage-agent",
@@ -499,12 +490,12 @@ async def run_agent_handoff():
 
     print("  [handoff] native handoff via handoff() (reference implementation)")
     # Both patched seams are installed and restored in `finally`: `_patched_method`
-    # for the caller-owned transfer invoker, `_invoke_agent_execution_spans` for the
+    # for the caller-owned handoff invoker, `_invoke_agent_execution_spans` for the
     # per-execution boundary that gives the source (triage) and the target (billing)
-    # one span each. The target's response lands on the target span, which carries no
-    # interaction type; the transfer stays the `execute_tool transfer_to_billing_agent`
-    # op wrapped above, a child of the triage span, and parents the target execution
-    # so the whole run is one trace. The entry point stays the public
+    # one span each. The target's response lands on the target's execution span,
+    # which carries no interaction type; the caller-owned `invoke_agent billing-agent`
+    # handoff op wrapped above is a child of the triage span and parents that target
+    # execution, so the whole run is one trace. The entry point stays the public
     # `Runner.run(triage_agent, ...)`.
     with (
         _patched_method(billing_handoff, "on_invoke_handoff", _traced_on_invoke_handoff),
