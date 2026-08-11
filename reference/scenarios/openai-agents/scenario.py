@@ -30,7 +30,9 @@ _reference_meter = reference_meter()
 # another agent, and `gen_ai.agent.name` then identifies the target agent; for an
 # ordinary tool call there is no interaction type and `gen_ai.agent.name` is the
 # agent executing the tool (see model/gen-ai/metrics.yaml). The native handoff is
-# not a tool execution, so it records no point here.
+# not a tool execution, so it records no point here. Every site records `error.type`
+# (conditionally required per model/gen-ai/metrics.yaml) when the execution it
+# times raises, derived from the exception's class name and never swallowed.
 _execute_tool_duration = _reference_meter.create_histogram(
     "gen_ai.execute_tool.duration",
     unit="s",
@@ -78,7 +80,10 @@ def _invoke_agent_execution_spans(*, request_model, input_text, handoff_parent_c
 
     Each execution's ``gen_ai.invoke_agent.duration`` point is recorded here, where the
     execution ends, so the two executions of one handoff run produce one point each.
-    The caller-owned handoff operation records none.
+    The caller-owned handoff operation records none. A turn that raises ends its own
+    execution's point with ``error.type`` set (conditionally required per
+    model/gen-ai/metrics.yaml) and the exception still propagates -- a failed source
+    or target execution is timed and classified, never swallowed.
     """
     import agents.run
 
@@ -95,15 +100,22 @@ def _invoke_agent_execution_spans(*, request_model, input_text, handoff_parent_c
         "run_context": _context.get_current(),
     }
 
-    def end_execution():
-        """End the open execution span and record its duration point, at most once."""
+    def end_execution(error_type=None):
+        """End the open execution span and record its duration point, at most once.
+
+        ``error_type`` is set only when the execution ended because its own turn
+        raised, so a failed source or target execution still records
+        ``error.type`` on this metric (conditionally required per
+        model/gen-ai/metrics.yaml), matching ADK's own ``resolve_error_type``
+        fallback to the exception's class name.
+        """
         if execution["span"] is None:
             return
         execution["span"].end()
-        _invoke_agent_duration.record(
-            time.perf_counter() - execution["started_at"],
-            {"gen_ai.agent.name": execution["agent_name"], "gen_ai.request.model": request_model},
-        )
+        duration_attributes = {"gen_ai.agent.name": execution["agent_name"], "gen_ai.request.model": request_model}
+        if error_type is not None:
+            duration_attributes["error.type"] = error_type
+        _invoke_agent_duration.record(time.perf_counter() - execution["started_at"], duration_attributes)
         execution["span"] = None
 
     async def _traced_run_single_turn(**kwargs):
@@ -144,7 +156,14 @@ def _invoke_agent_execution_spans(*, request_model, input_text, handoff_parent_c
 
         agent_span = execution["span"]
         with _trace.use_span(agent_span, end_on_exit=False):
-            turn_result = await original_run_single_turn(**kwargs)
+            try:
+                turn_result = await original_run_single_turn(**kwargs)
+            except Exception as e:
+                # This turn is the currently executing agent's own execution (source
+                # or target), so its failure ends that execution here and now, with
+                # a low-cardinality error identifier for the duration metric.
+                end_execution(error_type=type(e).__qualname__)
+                raise
             # Only a final-output step exposes `.output` (a handoff step exposes
             # `.new_agent`); the executing agent's own response goes on its own span,
             # never on the span of the agent that handed the work over.
@@ -197,6 +216,7 @@ def get_weather(ctx: ToolContext[None], location: str) -> str:
     if executing_agent_name:
         duration_attributes["gen_ai.agent.name"] = executing_agent_name
     start = time.perf_counter()
+    error_type = None
     try:
         with _reference_tracer.start_as_current_span(
             "execute_tool get_weather", attributes=tool_span_attributes
@@ -209,8 +229,15 @@ def get_weather(ctx: ToolContext[None], location: str) -> str:
             result = "Sunny, 72°F"
             tool_span.set_attribute("gen_ai.tool.call.result", result)
             return result
+    except Exception as e:
+        # Low-cardinality error identifier for the duration metric, matching ADK's
+        # own `resolve_error_type` fallback to the exception's class name.
+        error_type = type(e).__qualname__
+        raise
     finally:
         # Record in `finally` so a failed tool execution is still timed.
+        if error_type is not None:
+            duration_attributes["error.type"] = error_type
         _execute_tool_duration.record(time.perf_counter() - start, duration_attributes)
 
 
@@ -355,6 +382,7 @@ async def run_agent_as_tool_delegation():
             "gen_ai.tool.type": "function",
         }
         start = time.perf_counter()
+        error_type = None
         try:
             with _reference_tracer.start_as_current_span(
                 f"execute_tool {weather_tool.name}", attributes=tool_span_attributes
@@ -385,18 +413,23 @@ async def run_agent_as_tool_delegation():
                     )
                 tool_span.set_attribute("gen_ai.tool.call.result", str(result))
             return result
+        except Exception as e:
+            # Low-cardinality error identifier for the duration metric, matching ADK's
+            # own `resolve_error_type` fallback to the exception's class name.
+            error_type = type(e).__qualname__
+            raise
         finally:
             # Record in `finally` so a failed delegation is still timed. Every
             # dimension is the operation's target identity, known before the call.
-            _execute_tool_duration.record(
-                time.perf_counter() - start,
-                {
-                    "gen_ai.tool.name": weather_tool.name,
-                    "gen_ai.tool.type": "function",
-                    "gen_ai.agent.interaction.type": "delegation",
-                    "gen_ai.agent.name": specialist.name,
-                },
-            )
+            duration_attributes = {
+                "gen_ai.tool.name": weather_tool.name,
+                "gen_ai.tool.type": "function",
+                "gen_ai.agent.interaction.type": "delegation",
+                "gen_ai.agent.name": specialist.name,
+            }
+            if error_type is not None:
+                duration_attributes["error.type"] = error_type
+            _execute_tool_duration.record(time.perf_counter() - start, duration_attributes)
 
     caller = Agent(
         name="assistant",

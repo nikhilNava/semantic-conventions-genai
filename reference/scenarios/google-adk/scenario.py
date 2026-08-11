@@ -35,6 +35,9 @@ _tool_calls = _reference_meter.create_histogram(
 # the same metric is suppressed in `_suppress_adk_native_telemetry`). It carries
 # `gen_ai.agent.interaction.type` when the tool call is a delegation to another agent;
 # `gen_ai.agent.name` then identifies the target agent (see model/gen-ai/metrics.yaml).
+# Every site records `error.type` (conditionally required per model/gen-ai/metrics.yaml)
+# when the execution it times raises, derived from the exception's class name -- matching
+# ADK's own `resolve_error_type` fallback -- and never swallowed.
 _execute_tool_duration = _reference_meter.create_histogram(
     "gen_ai.execute_tool.duration",
     unit="s",
@@ -178,6 +181,7 @@ def run_agent_reference():
             "gen_ai.tool.type": "function",
         }
         start = time.perf_counter()
+        error_type = None
         try:
             with _reference_tracer.start_as_current_span(
                 "execute_tool get_weather", attributes=tool_span_attributes
@@ -190,18 +194,23 @@ def run_agent_reference():
                 result = f"Sunny in {location}"
                 tool_span.set_attribute("gen_ai.tool.call.result", result)
             return result
+        except Exception as e:
+            # Low-cardinality error identifier for the duration metric, matching ADK's
+            # own `resolve_error_type` fallback to the exception's class name.
+            error_type = type(e).__qualname__
+            raise
         finally:
             # Record in `finally` so a failed tool call is still timed. This is an ordinary tool
             # execution, so there is no interaction type and `gen_ai.agent.name` is the agent
             # executing the tool -- the same value the span carries.
-            _execute_tool_duration.record(
-                time.perf_counter() - start,
-                {
-                    "gen_ai.tool.name": "get_weather",
-                    "gen_ai.tool.type": "function",
-                    "gen_ai.agent.name": tool_context.agent_name,
-                },
-            )
+            duration_attributes = {
+                "gen_ai.tool.name": "get_weather",
+                "gen_ai.tool.type": "function",
+                "gen_ai.agent.name": tool_context.agent_name,
+            }
+            if error_type is not None:
+                duration_attributes["error.type"] = error_type
+            _execute_tool_duration.record(time.perf_counter() - start, duration_attributes)
 
     tool_defs = [
         {
@@ -474,6 +483,7 @@ def run_multi_agent_delegation_reference():
                 "gen_ai.tool.type": "function",
             }
             start = time.perf_counter()
+            error_type = None
             try:
                 with _reference_tracer.start_as_current_span(
                     f"execute_tool {agent_tool.name}", attributes=tool_span_attributes
@@ -504,18 +514,23 @@ def run_multi_agent_delegation_reference():
                         )
                     tool_span.set_attribute("gen_ai.tool.call.result", str(result))
                 return result
+            except Exception as e:
+                # Low-cardinality error identifier for the duration metric, matching
+                # ADK's own `resolve_error_type` fallback to the exception's class name.
+                error_type = type(e).__qualname__
+                raise
             finally:
                 # Record in `finally` so a failed delegation is still timed. Every
                 # dimension is the operation's target identity, known before the call.
-                _execute_tool_duration.record(
-                    time.perf_counter() - start,
-                    {
-                        "gen_ai.tool.name": agent_tool.name,
-                        "gen_ai.tool.type": "function",
-                        "gen_ai.agent.interaction.type": "delegation",
-                        "gen_ai.agent.name": specialist.name,
-                    },
-                )
+                duration_attributes = {
+                    "gen_ai.tool.name": agent_tool.name,
+                    "gen_ai.tool.type": "function",
+                    "gen_ai.agent.interaction.type": "delegation",
+                    "gen_ai.agent.name": specialist.name,
+                }
+                if error_type is not None:
+                    duration_attributes["error.type"] = error_type
+                _execute_tool_duration.record(time.perf_counter() - start, duration_attributes)
 
         root_agent = Agent(
             name="root_agent",
