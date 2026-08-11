@@ -997,6 +997,11 @@ available.
 When this metric is reported alongside a `gen_ai.invoke_agent.internal`
 span, the metric value SHOULD be the same as the span duration.
 
+This metric measures the agent's own execution. A caller-owned
+`invoke_agent` operation that only directs work to another agent — the
+delegation or handoff operation carrying `gen_ai.agent.interaction.type` —
+MUST NOT record it, so one agent invocation yields one data point.
+
 **Requirement level:** [Recommended](https://github.com/open-telemetry/semantic-conventions/blob/v1.44.0/docs/general/signal-requirement-level.md).
 
 **Attributes:**
@@ -1052,6 +1057,11 @@ exactly once across the call tree.
 This metric SHOULD be emitted together with the
 `gen_ai.invoke_agent.internal` span for the same invocation.
 
+This metric counts the agent's own execution. A caller-owned
+`invoke_agent` operation that only directs work to another agent — the
+delegation or handoff operation carrying `gen_ai.agent.interaction.type` —
+MUST NOT record it, so one agent invocation yields one data point.
+
 **Requirement level:** [Recommended](https://github.com/open-telemetry/semantic-conventions/blob/v1.44.0/docs/general/signal-requirement-level.md).
 
 **Attributes:**
@@ -1095,6 +1105,11 @@ counted here.
 
 This metric SHOULD be emitted together with the
 `gen_ai.invoke_agent.internal` span for the same invocation.
+
+This metric counts the agent's own execution. A caller-owned
+`invoke_agent` operation that only directs work to another agent — the
+delegation or handoff operation carrying `gen_ai.agent.interaction.type` —
+MUST NOT record it, so one agent invocation yields one data point.
 
 **Requirement level:** [Recommended](https://github.com/open-telemetry/semantic-conventions/blob/v1.44.0/docs/general/signal-requirement-level.md).
 

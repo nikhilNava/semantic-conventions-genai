@@ -542,6 +542,12 @@ For example, the OpenAI Agents SDK records a native handoff with its own handoff
 naming the source and target agents, distinct from the spans it records for function
 tools.
 
+The agent-execution metrics — `gen_ai.invoke_agent.duration`,
+`gen_ai.invoke_agent.inference_calls` and `gen_ai.invoke_agent.tool_calls` — follow the
+execution span, not the caller-owned operation: a span carrying
+`gen_ai.agent.interaction.type` MUST NOT record them, so one agent invocation yields one
+data point per metric.
+
 Examples: LangChain agents, CrewAI agents.
 
 **Span name** SHOULD be `invoke_agent {gen_ai.agent.name}` if `gen_ai.agent.name` is readily available.

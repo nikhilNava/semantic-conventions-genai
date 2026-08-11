@@ -37,6 +37,18 @@ _execute_tool_duration = _reference_meter.create_histogram(
     description="The duration of a single tool execution.",
 )
 
+# `gen_ai.invoke_agent.duration` measures an agent's own execution, so it is recorded
+# once per logical agent execution, next to that execution's `invoke_agent` span. The
+# caller-owned handoff operation carries `gen_ai.agent.interaction.type` and only directs
+# work to another agent, so it records no point here (see model/gen-ai/metrics.yaml):
+# the handoff run produces two `invoke_agent billing-agent` spans but exactly one
+# billing-agent data point.
+_invoke_agent_duration = _reference_meter.create_histogram(
+    "gen_ai.invoke_agent.duration",
+    unit="s",
+    description="The end-to-end duration of a single in-process agent invocation.",
+)
+
 
 @contextlib.contextmanager
 def _invoke_agent_execution_spans(*, request_model, input_text, handoff_parent_context):
@@ -63,6 +75,10 @@ def _invoke_agent_execution_spans(*, request_model, input_text, handoff_parent_c
     execution only. Each executing agent's own response goes on its own span, and no
     execution span carries ``gen_ai.agent.interaction.type`` -- that is caller-owned
     and belongs on the operation that directed the work.
+
+    Each execution's ``gen_ai.invoke_agent.duration`` point is recorded here, where the
+    execution ends, so the two executions of one handoff run produce one point each.
+    The caller-owned handoff operation records none.
     """
     import agents.run
 
@@ -71,13 +87,29 @@ def _invoke_agent_execution_spans(*, request_model, input_text, handoff_parent_c
     # upgraded to the first execution span below, so it is a stable, non-empty
     # parent for the rest of the run. It lives in this generator call, so one run
     # never inherits the context of another.
-    execution = {"span": None, "agent_name": None, "started": False, "run_context": _context.get_current()}
+    execution = {
+        "span": None,
+        "agent_name": None,
+        "started": False,
+        "started_at": None,
+        "run_context": _context.get_current(),
+    }
+
+    def end_execution():
+        """End the open execution span and record its duration point, at most once."""
+        if execution["span"] is None:
+            return
+        execution["span"].end()
+        _invoke_agent_duration.record(
+            time.perf_counter() - execution["started_at"],
+            {"gen_ai.agent.name": execution["agent_name"], "gen_ai.request.model": request_model},
+        )
+        execution["span"] = None
 
     async def _traced_run_single_turn(**kwargs):
         executing_agent = kwargs["bindings"].public_agent
         if execution["agent_name"] != executing_agent.name:
-            if execution["span"] is not None:
-                execution["span"].end()
+            end_execution()
             agent_span_attributes = {
                 "gen_ai.operation.name": "invoke_agent",
                 "gen_ai.request.model": request_model,
@@ -103,7 +135,12 @@ def _invoke_agent_execution_spans(*, request_model, input_text, handoff_parent_c
                     "gen_ai.input.messages",
                     json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}]),
                 )
-            execution.update(span=agent_span, agent_name=executing_agent.name, started=True)
+            execution.update(
+                span=agent_span,
+                agent_name=executing_agent.name,
+                started=True,
+                started_at=time.perf_counter(),
+            )
 
         agent_span = execution["span"]
         with _trace.use_span(agent_span, end_on_exit=False):
@@ -124,8 +161,8 @@ def _invoke_agent_execution_spans(*, request_model, input_text, handoff_parent_c
         yield
     finally:
         agents.run.run_single_turn = original_run_single_turn
-        if execution["span"] is not None:
-            execution["span"].end()
+        # In `finally` so a failed execution is still ended and still timed.
+        end_execution()
 
 
 @contextlib.contextmanager
@@ -432,6 +469,12 @@ async def run_agent_handoff():
     The SDK has no public per-execution boundary, so `_invoke_agent_execution_spans`
     derives it from the active agent changing across the private `run_single_turn`
     seam, while the scenario's entry point stays the public `Runner.run`.
+
+    Because two of those three spans are named `invoke_agent billing-agent`, the
+    agent-execution metrics have to pick one: `gen_ai.invoke_agent.duration` is
+    recorded for the two executions only, never for the caller-owned handoff
+    operation, so one logical billing-agent invocation contributes exactly one
+    data point.
     """
     client = openai.AsyncOpenAI(base_url=MOCK_BASE_URL, api_key="mock-key")
     request_model = "gpt-4o-mini"
