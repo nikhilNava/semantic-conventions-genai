@@ -1118,9 +1118,11 @@ Instrumentations SHOULD document the list of errors they report.
 
 **[3] `gen_ai.agent.interaction.type`:** When the instrumented framework or protocol explicitly distinguishes the tool call as a delegation or handoff to another agent.
 
-**[4] `gen_ai.agent.interaction.type`:** This attribute applies to the tool call that directs work to another agent: a tool
-that exists to invoke or hand off to that agent. It MUST NOT be inferred from span
-hierarchy or recorded on the target agent's own execution span.
+**[4] `gen_ai.agent.interaction.type`:** This attribute applies to the caller-owned operation that directs work to another
+agent: an `execute_tool` operation whose tool exists to invoke or hand off to that
+agent, or an `invoke_agent` operation that the framework or protocol explicitly
+classifies as a delegation or handoff. It MUST NOT be inferred from span hierarchy
+or recorded on the target agent's own execution span.
 
 When this attribute is present, `gen_ai.agent.name` on the same span or metric MUST
 identify the target agent receiving the delegation or handoff, not the agent that
