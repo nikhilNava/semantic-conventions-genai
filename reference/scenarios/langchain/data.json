@@ -1,6 +1,8 @@
 {
   "spans": {
     "gen_ai.execute_tool.internal": [
+      "gen_ai.agent.interaction.type",
+      "gen_ai.agent.name",
       "gen_ai.operation.name",
       "gen_ai.tool.call.arguments",
       "gen_ai.tool.call.id",

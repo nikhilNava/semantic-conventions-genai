@@ -70,6 +70,14 @@ def test_span_specs_are_named_as_the_registry_names_them():
         assert spec.registry_id.startswith("gen_ai."), key
 
 
+def test_committed_langchain_agent_interaction_coverage():
+    entries = {entry.library: entry for entry in load_scenario_data_files()}
+    langchain = entries["langchain"]
+
+    assert langchain.spans["execute_tool"]["gen_ai.agent.interaction.type"] == "present"
+    assert langchain.spans["invoke_agent_internal"]["gen_ai.agent.interaction.type"] == "absent"
+
+
 if __name__ == "__main__":
     test_metric_specs_expose_recommended_agent_name()
     test_metric_specs_are_named_as_the_registry_names_them()
@@ -78,4 +86,5 @@ if __name__ == "__main__":
     test_events_keep_their_registry_names()
     test_span_types_absent_from_a_data_file_are_not_reported()
     test_span_specs_are_named_as_the_registry_names_them()
+    test_committed_langchain_agent_interaction_coverage()
     print("ok")
