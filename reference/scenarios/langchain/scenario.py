@@ -493,9 +493,19 @@ async def run_tool_handoff_reference():
                 result = await source_agent.ainvoke(state)
             except ParentCommand as bubble_up:
                 command = bubble_up.args[0]
-                handoff_message = next(
-                    message for message in reversed(command.update["messages"]) if isinstance(message, AIMessage)
-                )
+                handoff_message = None
+                for message in reversed(command.update["messages"]):
+                    if isinstance(message, AIMessage):
+                        handoff_message = message
+                        break
+                if handoff_message is None:
+                    raise RuntimeError(
+                        "ParentCommand.update['messages'] must include the AIMessage tool-call message for the handoff."
+                    ) from None
+                if not handoff_message.tool_calls:
+                    raise RuntimeError(
+                        "ParentCommand.update['messages'] must include an AIMessage tool call for the handoff."
+                    ) from None
                 tool_call = handoff_message.tool_calls[0]
                 source_span.set_attribute(
                     "gen_ai.output.messages",
