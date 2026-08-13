@@ -13,8 +13,8 @@
 
 | Attribute | Supporting Libraries |
 | --- | --- |
-| gen_ai.agent.interaction.type | [google-adk], [openai-agents] |
-| gen_ai.agent.name | [google-adk], [openai-agents], [pydantic-ai] |
+| gen_ai.agent.interaction.type | [google-adk], [langchain], [openai-agents] |
+| gen_ai.agent.name | [google-adk], [langchain], [openai-agents], [pydantic-ai] |
 
 ## Recommended
 

@@ -100,13 +100,22 @@ async def agent_node(state: GraphState) -> GraphState:
 
         final_message = result["messages"][-1]
         usage = getattr(final_message, "usage_metadata", None) or {}
+        finish_reason = (getattr(final_message, "response_metadata", None) or {}).get("finish_reason", "stop")
         if usage.get("input_tokens"):
             agent_span.set_attribute("gen_ai.usage.input_tokens", usage["input_tokens"])
         if usage.get("output_tokens"):
             agent_span.set_attribute("gen_ai.usage.output_tokens", usage["output_tokens"])
         agent_span.set_attribute(
             "gen_ai.output.messages",
-            json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": final_message.text()}]}]),
+            json.dumps(
+                [
+                    {
+                        "role": "assistant",
+                        "parts": [{"type": "text", "content": final_message.text()}],
+                        "finish_reason": finish_reason,
+                    }
+                ]
+            ),
         )
         return {"messages": state["messages"] + [final_message.text()]}
 
@@ -316,7 +325,9 @@ async def run_subagent_tool_delegation_reference():
                     ),
                 )
                 result = await specialist.ainvoke({"messages": [{"role": "user", "content": query}]})
-                output = result["messages"][-1].text()
+                output_message = result["messages"][-1]
+                output = output_message.text()
+                finish_reason = (getattr(output_message, "response_metadata", None) or {}).get("finish_reason", "stop")
                 target_span.set_attribute(
                     "gen_ai.output.messages",
                     json.dumps(
@@ -324,6 +335,7 @@ async def run_subagent_tool_delegation_reference():
                             {
                                 "role": "assistant",
                                 "parts": [{"type": "text", "content": output}],
+                                "finish_reason": finish_reason,
                             }
                         ]
                     ),
@@ -364,7 +376,9 @@ async def run_subagent_tool_delegation_reference():
             ),
         )
         result = await supervisor.ainvoke({"messages": [{"role": "user", "content": input_text}]})
-        output = result["messages"][-1].text()
+        output_message = result["messages"][-1]
+        output = output_message.text()
+        finish_reason = (getattr(output_message, "response_metadata", None) or {}).get("finish_reason", "stop")
         supervisor_span.set_attribute(
             "gen_ai.output.messages",
             json.dumps(
@@ -372,6 +386,7 @@ async def run_subagent_tool_delegation_reference():
                     {
                         "role": "assistant",
                         "parts": [{"type": "text", "content": output}],
+                        "finish_reason": finish_reason,
                     }
                 ]
             ),
@@ -385,6 +400,7 @@ async def run_tool_handoff_reference():
     from langchain.messages import AIMessage, ToolMessage
     from langchain.tools import ToolRuntime
     from langchain_openai import ChatOpenAI
+    from langgraph.errors import ParentCommand
     from langgraph.graph import END, START, StateGraph
     from langgraph.types import Command
 
@@ -401,9 +417,6 @@ async def run_tool_handoff_reference():
     def transfer_to_weather_agent(
         runtime: ToolRuntime,
     ) -> Command:
-        last_ai_message = next(
-            message for message in reversed(runtime.state["messages"]) if isinstance(message, AIMessage)
-        )
         tool_span_attributes = {
             "gen_ai.operation.name": "execute_tool",
             "gen_ai.tool.name": "transfer_to_weather_agent",
@@ -416,6 +429,9 @@ async def run_tool_handoff_reference():
             tool_span.set_attribute("gen_ai.agent.interaction.type", "handoff")
             tool_span.set_attribute("gen_ai.agent.name", target_name)
             tool_span.set_attribute("gen_ai.tool.call.id", runtime.tool_call_id)
+            last_ai_message = next(
+                message for message in reversed(runtime.state["messages"]) if isinstance(message, AIMessage)
+            )
             command = Command(
                 goto=target_name,
                 update={
@@ -459,8 +475,66 @@ async def run_tool_handoff_reference():
         with _reference_tracer.start_as_current_span(
             f"invoke_agent {source_name}",
             attributes=source_span_attributes,
-        ):
-            return await source_agent.ainvoke(state)
+        ) as source_span:
+            input_message = state["messages"][-1]
+            input_content = input_message["content"] if isinstance(input_message, dict) else str(input_message.content)
+            source_span.set_attribute(
+                "gen_ai.input.messages",
+                json.dumps(
+                    [
+                        {
+                            "role": "user",
+                            "parts": [{"type": "text", "content": input_content}],
+                        }
+                    ]
+                ),
+            )
+            try:
+                result = await source_agent.ainvoke(state)
+            except ParentCommand as bubble_up:
+                command = bubble_up.args[0]
+                handoff_message = next(
+                    message for message in reversed(command.update["messages"]) if isinstance(message, AIMessage)
+                )
+                tool_call = handoff_message.tool_calls[0]
+                source_span.set_attribute(
+                    "gen_ai.output.messages",
+                    json.dumps(
+                        [
+                            {
+                                "role": "assistant",
+                                "parts": [
+                                    {
+                                        "type": "tool_call",
+                                        "id": tool_call["id"],
+                                        "name": tool_call["name"],
+                                        "arguments": tool_call["args"],
+                                    }
+                                ],
+                                "finish_reason": (handoff_message.response_metadata or {}).get(
+                                    "finish_reason", "tool_calls"
+                                ),
+                            }
+                        ]
+                    ),
+                )
+                return command
+
+            last_message = result["messages"][-1]
+            finish_reason = (getattr(last_message, "response_metadata", None) or {}).get("finish_reason", "stop")
+            source_span.set_attribute(
+                "gen_ai.output.messages",
+                json.dumps(
+                    [
+                        {
+                            "role": "assistant",
+                            "parts": [{"type": "text", "content": str(last_message.content)}],
+                            "finish_reason": finish_reason,
+                        }
+                    ]
+                ),
+            )
+            return result
 
     async def call_target(state: AgentState):
         target_span_attributes = {
@@ -473,7 +547,9 @@ async def run_tool_handoff_reference():
             attributes=target_span_attributes,
         ) as target_span:
             result = await target_agent.ainvoke(state)
-            output = result["messages"][-1].text()
+            output_message = result["messages"][-1]
+            output = output_message.text()
+            finish_reason = (getattr(output_message, "response_metadata", None) or {}).get("finish_reason", "stop")
             target_span.set_attribute(
                 "gen_ai.output.messages",
                 json.dumps(
@@ -481,6 +557,7 @@ async def run_tool_handoff_reference():
                         {
                             "role": "assistant",
                             "parts": [{"type": "text", "content": output}],
+                            "finish_reason": finish_reason,
                         }
                     ]
                 ),
@@ -541,6 +618,7 @@ async def run_workflow_reference():
                 {
                     "role": "assistant",
                     "parts": [{"type": "text", "content": str(final_output)}],
+                    "finish_reason": "stop",
                 }
             ]
         )
