@@ -40,6 +40,20 @@ def test_metric_specs_are_named_as_the_registry_names_them():
         assert spec.registry_id == name, name
 
 
+def test_execute_tool_duration_does_not_include_transfer_attributes():
+    metrics_model = (Path(__file__).parents[2] / "model" / "gen-ai" / "metrics.yaml").read_text(encoding="utf-8")
+    execute_tool_duration = metrics_model.split("- name: gen_ai.execute_tool.duration", 1)[1].split(
+        "metric_refinements:", 1
+    )[0]
+    assert "gen_ai.transfer." not in execute_tool_duration
+
+
+def test_committed_metrics_do_not_include_transfer_attributes():
+    for path in (Path(__file__).parents[1] / "scenarios").glob("*/data.json"):
+        metrics = json.loads(path.read_text(encoding="utf-8")).get("metrics", {})
+        assert "gen_ai.transfer." not in json.dumps(metrics), path
+
+
 def test_committed_google_adk_metrics_round_trip():
     entries = {e.library: e for e in load_scenario_data_files()}
     adk = entries["google-adk"]
@@ -107,6 +121,8 @@ def test_interaction_type_is_removed_from_committed_scenarios():
 if __name__ == "__main__":
     test_metric_specs_expose_recommended_agent_name()
     test_metric_specs_are_named_as_the_registry_names_them()
+    test_execute_tool_duration_does_not_include_transfer_attributes()
+    test_committed_metrics_do_not_include_transfer_attributes()
     test_committed_google_adk_metrics_round_trip()
     test_registry_span_names_map_onto_report_keys()
     test_events_keep_their_registry_names()

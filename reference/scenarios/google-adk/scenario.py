@@ -33,8 +33,8 @@ _tool_calls = _reference_meter.create_histogram(
 # `gen_ai.execute_tool.duration` is recorded once per tool execution this scenario
 # instruments, next to that execution's `execute_tool` span (ADK's own instrument for
 # the same metric is suppressed in `_suppress_adk_native_telemetry`).
-# `gen_ai.agent.name` identifies the agent executing the tool. AgentTool calls also
-# carry `gen_ai.transfer.*` attributes describing the target and transfer mode.
+# `gen_ai.agent.name` identifies the agent executing the tool. Transfer attributes
+# remain span-only.
 # Every site records `error.type` (conditionally required per model/gen-ai/metrics.yaml)
 # when the execution it times raises, derived from the exception's class name -- matching
 # ADK's own `resolve_error_type` fallback -- and never swallowed.
@@ -530,9 +530,9 @@ def run_multi_agent_delegation_reference():
             finally:
                 # Record in `finally` so a failed transfer is still timed.
                 duration_attributes = {
+                    "gen_ai.agent.name": root_agent.name,
                     "gen_ai.tool.name": agent_tool.name,
                     "gen_ai.tool.type": "function",
-                    **transfer_attributes,
                 }
                 if error_type is not None:
                     duration_attributes["error.type"] = error_type

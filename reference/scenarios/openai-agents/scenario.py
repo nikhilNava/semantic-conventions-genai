@@ -25,10 +25,8 @@ _reference_meter = reference_meter()
 
 # `gen_ai.execute_tool.duration` is recorded once per tool execution this scenario
 # instruments, next to that execution's `execute_tool` span. `gen_ai.agent.name`
-# identifies the agent executing the tool. Agent-as-tool calls also carry
-# `gen_ai.transfer.*` attributes describing the return-to-caller transfer and
-# target (see model/gen-ai/metrics.yaml). A native handoff is
-# not a tool execution, so it records no point here. Every site records `error.type`
+# identifies the agent executing the tool. Transfer attributes remain span-only.
+# A native handoff is not a tool execution, so it records no point here. Every site records `error.type`
 # (conditionally required per model/gen-ai/metrics.yaml) when the execution it
 # times raises, derived from the exception's class name and never swallowed.
 _execute_tool_duration = _reference_meter.create_histogram(
@@ -412,9 +410,9 @@ async def run_agent_as_tool_delegation():
         finally:
             # Record in `finally` so a failed transfer is still timed.
             duration_attributes = {
+                "gen_ai.agent.name": caller.name,
                 "gen_ai.tool.name": weather_tool.name,
                 "gen_ai.tool.type": "function",
-                **transfer_attributes,
             }
             if error_type is not None:
                 duration_attributes["error.type"] = error_type

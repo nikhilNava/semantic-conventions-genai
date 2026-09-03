@@ -1134,8 +1134,6 @@ When this metric is reported alongside a `gen_ai.execute_tool` span,
 the metric value SHOULD be the same as the span duration.
 
 `gen_ai.agent.name` identifies the agent executing the tool.
-When the tool call transfers work or control, `gen_ai.transfer.*`
-records the transfer mode and target.
 
 **Requirement level:** [Recommended](https://github.com/open-telemetry/semantic-conventions/blob/v1.44.0/docs/general/signal-requirement-level.md).
 
@@ -1146,28 +1144,13 @@ records the transfer mode and target.
 | [`gen_ai.tool.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Required` | string | Name of the tool utilized by the agent. | `Flights` |
 | [`error.type`](https://github.com/open-telemetry/semantic-conventions/blob/v1.44.0/docs/registry/attributes/error.md) | ![Stable](https://img.shields.io/badge/-stable-lightgreen) | `Conditionally Required` If the operation ended in an error. | string | Describes a class of error the operation ended with. [1] | `timeout`; `java.net.UnknownHostException`; `server_certificate_invalid`; `500` |
 | [`gen_ai.agent.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` When applicable. | string | The name of the agent executing the tool. | `Math Tutor`; `Fiction Writer` |
-| [`gen_ai.transfer.mode`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [2] | string | Describes how control passes to the transfer target. [3] | `return_to_caller`; `pass_control` |
-| [`gen_ai.transfer.target.id`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [4] | string | The unique and stable identifier of the transfer target. | `agent-42`; `support-tier-2` |
-| [`gen_ai.transfer.target.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [5] | string | The human-readable name of the transfer target. | `weather_agent`; `human_support` |
-| [`gen_ai.transfer.target.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [6] | string | The type of the transfer target. | `agent`; `human`; `workflow` |
-| [`gen_ai.tool.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` If available. | string | Type of the tool utilized by the agent [7] | `function`; `extension`; `datastore` |
+| [`gen_ai.tool.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` If available. | string | Type of the tool utilized by the agent [2] | `function`; `extension`; `datastore` |
 
 **[1] `error.type`:** The `error.type` SHOULD match the error code returned by the Generative AI provider or the client library,
 the canonical name of exception that occurred, or another low-cardinality error identifier.
 Instrumentations SHOULD document the list of errors they report.
 
-**[2] `gen_ai.transfer.mode`:** When the instrumented framework or protocol explicitly exposes the tool call as a transfer.
-
-**[3] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer any `gen_ai.transfer.*` attribute from span
-hierarchy, tool names, timing, or application-specific conventions.
-
-**[4] `gen_ai.transfer.target.id`:** When `gen_ai.transfer.mode` is present and the target identifier is available.
-
-**[5] `gen_ai.transfer.target.name`:** When `gen_ai.transfer.mode` is present and the target name is available.
-
-**[6] `gen_ai.transfer.target.type`:** When `gen_ai.transfer.mode` is present and the target type is known.
-
-**[7] `gen_ai.tool.type`:** Extension: A tool executed on the agent-side to directly call external APIs, bridging the gap between the agent and real-world systems.
+**[2] `gen_ai.tool.type`:** Extension: A tool executed on the agent-side to directly call external APIs, bridging the gap between the agent and real-world systems.
   Agent-side operations involve actions that are performed by the agent on the server or within the agent's controlled environment.
 Function: A tool executed on the client-side, where the agent generates parameters for a predefined function, and the client executes the logic.
   Client-side operations are actions taken on the user's end or within the client application.
@@ -1180,25 +1163,6 @@ Datastore: A tool used by the agent to access and query structured or unstructur
 | Value | Description | Stability |
 | --- | --- | --- |
 | `_OTHER` | A fallback error value to be used when the instrumentation doesn't define a custom value. | ![Stable](https://img.shields.io/badge/-stable-lightgreen) |
-
----
-
-`gen_ai.transfer.mode` has the following list of well-known values. If one of them applies, then the respective value MUST be used; otherwise, a custom value MAY be used.
-
-| Value | Description | Stability |
-| --- | --- | --- |
-| `pass_control` | The target takes control of the remaining work. | ![Development](https://img.shields.io/badge/-development-blue) |
-| `return_to_caller` | The initiator waits for the target to finish and then resumes execution. | ![Development](https://img.shields.io/badge/-development-blue) |
-
----
-
-`gen_ai.transfer.target.type` has the following list of well-known values. If one of them applies, then the respective value MUST be used; otherwise, a custom value MAY be used.
-
-| Value | Description | Stability |
-| --- | --- | --- |
-| `agent` | A GenAI agent. | ![Development](https://img.shields.io/badge/-development-blue) |
-| `human` | A person or group of people. | ![Development](https://img.shields.io/badge/-development-blue) |
-| `workflow` | A workflow or workflow step. | ![Development](https://img.shields.io/badge/-development-blue) |
 
 <!-- prettier-ignore-end -->
 <!-- END AUTOGENERATED TEXT -->
