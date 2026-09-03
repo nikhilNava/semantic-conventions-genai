@@ -34,21 +34,26 @@ The semantic conventions for GenAI agents extend and override the semantic conve
 
 Agent-to-agent interactions have two independently observable parts:
 
-1. A caller-owned operation in which a source agent directs work to a target agent.
+1. A caller-owned operation in which a source directs work or passes control to a target.
 2. An `invoke_agent` INTERNAL span representing the target agent's execution, when that execution is observable.
 
 Use the operation exposed by the instrumented framework or protocol:
 
 | Framework or protocol operation | Caller-owned span |
 | --- | --- |
-| A tool call invokes or hands off to another agent | [`execute_tool`](gen-ai-spans.md#execute-tool-span) |
-| A remote API or protocol invokes another agent | [`invoke_agent` CLIENT](#invoke-agent-client-span) |
+| A tool call transfers work or control | [`execute_tool`](gen-ai-spans.md#execute-tool-span) |
+| A remote API or protocol transfers work or control to an agent | [`invoke_agent` CLIENT](#invoke-agent-client-span) |
 
-`gen_ai.agent.interaction.type` is recorded on the caller-owned span only when
-the framework or protocol explicitly identifies the interaction as a delegation
-or handoff. It MUST NOT be inferred from span hierarchy, tool names, timing, or
-application-specific conventions. `gen_ai.agent.name` on the caller-owned span
-identifies the target agent.
+`gen_ai.transfer.mode` records whether the initiator waits for the target and
+resumes (`return_to_caller`) or the target takes control of the remaining work
+(`pass_control`). `gen_ai.transfer.target.*` identifies the target.
+
+Record transfer attributes only when the framework or protocol exposes the
+transfer semantics and target. They MUST NOT be inferred from span hierarchy,
+tool names, timing, or application-specific conventions.
+
+On an `execute_tool` span, `gen_ai.agent.*` identifies the agent executing the
+tool. On an `invoke_agent` span, it identifies the invoked agent.
 
 For a tool-based interaction in one process:
 
@@ -58,7 +63,7 @@ flowchart LR
     direction LR
     subgraph S["SOURCE AGENT"]
       S1["invoke_agent source<br/>agent execution"]
-      S2["execute_tool transfer<br/>caller-owned interaction<br/>agent.name = target"]
+      S2["execute_tool transfer<br/>agent.name = source<br/>transfer.mode = return_to_caller | pass_control<br/>transfer.target.type = agent<br/>transfer.target.name = target"]
       S1 --> S2
     end
     subgraph T["TARGET AGENT"]
@@ -74,7 +79,7 @@ For an invocation across a process or service boundary:
 flowchart LR
   subgraph C["CALLER PROCESS"]
     C1["invoke_agent source<br/>agent execution"]
-    C2["invoke_agent target [CLIENT]<br/>caller-owned interaction<br/>agent.name = target"]
+    C2["invoke_agent target [CLIENT]<br/>agent.name = target<br/>transfer.mode = return_to_caller | pass_control<br/>transfer.target.type = agent<br/>transfer.target.name = target"]
     C1 --> C2
   end
   subgraph T["TARGET PROCESS"]
@@ -89,8 +94,7 @@ context-propagation mechanism.
 
 A dedicated in-process non-tool transfer has no caller-owned span under these
 conventions. When the source and target agent executions are observable, record
-each as an `invoke_agent` INTERNAL span without
-`gen_ai.agent.interaction.type`.
+each as an `invoke_agent` INTERNAL span.
 
 ### Create agent span
 

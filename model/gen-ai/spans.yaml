@@ -163,9 +163,7 @@ attribute_groups:
         requirement_level:
           recommended: If available.
       - ref: gen_ai.agent.name
-        brief: >
-          When `gen_ai.agent.interaction.type` is present, identifies the target agent receiving
-          the delegation or handoff; otherwise identifies the agent executing the tool.
+        brief: The name of the agent executing the tool.
         requirement_level:
           conditionally_required: When applicable.
 
@@ -517,13 +515,10 @@ spans:
     note: |
       The `gen_ai.operation.name` SHOULD be `invoke_agent`.
 
-      This is a caller-owned operation. The `gen_ai.agent.*` attributes identify the
-      target agent invoked over the remote service. When the framework or protocol
-      explicitly classifies the invocation as a delegation or handoff,
-      `gen_ai.agent.interaction.type` records that classification.
-
-      When the target agent's execution is separately instrumented, its execution span
-      MUST NOT carry `gen_ai.agent.interaction.type`.
+      The `gen_ai.agent.*` attributes identify the agent invoked over the remote
+      service. When the framework or protocol explicitly exposes this invocation
+      as a transfer, `gen_ai.transfer.*` records the transfer mode and target.
+      The transfer target values can match the invoked agent values.
 
       Examples: OpenAI Assistants API, AWS Bedrock Agents.
     stability: development
@@ -555,9 +550,18 @@ spans:
         brief: The version of the invoked GenAI agent.
         requirement_level:
           conditionally_required: When available.
-      - ref: gen_ai.agent.interaction.type
+      - ref: gen_ai.transfer.mode
         requirement_level:
-          conditionally_required: When the instrumented framework or protocol explicitly distinguishes this caller-owned invocation as a delegation or handoff to another agent.
+          conditionally_required: When the instrumented framework or protocol explicitly exposes this invocation as a transfer.
+      - ref: gen_ai.transfer.target.type
+        requirement_level:
+          conditionally_required: When `gen_ai.transfer.mode` is present.
+      - ref: gen_ai.transfer.target.name
+        requirement_level:
+          conditionally_required: When `gen_ai.transfer.mode` is present and the target name is available.
+      - ref: gen_ai.transfer.target.id
+        requirement_level:
+          conditionally_required: When `gen_ai.transfer.mode` is present and the target identifier is available.
 
   - type: gen_ai.invoke_agent.internal
     requirement_level: recommended
@@ -573,9 +577,8 @@ spans:
       The `gen_ai.operation.name` SHOULD be `invoke_agent`.
 
       This span represents the execution of the agent identified by the
-      `gen_ai.agent.*` attributes. It MUST NOT carry
-      `gen_ai.agent.interaction.type`; that attribute belongs to a caller-owned
-      `execute_tool` or `invoke_agent` client operation.
+      `gen_ai.agent.*` attributes. It does not represent the caller-owned
+      operation that transferred control to this agent.
 
       Examples: LangChain agents, CrewAI agents.
     stability: development
@@ -608,13 +611,11 @@ spans:
       own code and to manually instrument any tool calls that automatic
       instrumentations do not cover.
 
-      Some tool calls are themselves agent-directed operations: the tool exists to
-      invoke or hand off to another agent. On those, `gen_ai.agent.interaction.type`
-      records how the framework or protocol classifies the call, and `gen_ai.agent.name`
-      MUST identify the target agent receiving the delegation or handoff. On ordinary
-      `execute_tool` spans, which do not carry `gen_ai.agent.interaction.type`,
-      `gen_ai.agent.name` retains its default meaning: the agent executing the tool.
-      The target agent's own execution MUST NOT carry `gen_ai.agent.interaction.type`.
+      Some tool calls transfer work or control to another target.
+      `gen_ai.transfer.mode` records whether the agent executing the tool waits
+      for a result and resumes or passes control to the target.
+      `gen_ai.transfer.target.*` identifies that target. `gen_ai.agent.*` continues
+      to identify the agent executing the tool.
 
       When the framework or protocol performs the transfer through a remote agent
       invocation rather than a tool execution, it is recorded as a
@@ -623,8 +624,7 @@ spans:
 
       These conventions do not define a caller-owned span for a dedicated in-process
       non-tool transfer. When the source and target agent executions are observable,
-      each is recorded as a `gen_ai.invoke_agent` internal span without
-      `gen_ai.agent.interaction.type`.
+      each is recorded as a `gen_ai.invoke_agent` internal span.
     stability: development
     attributes:
       - ref_group: attributes.gen_ai.error
@@ -646,9 +646,18 @@ spans:
         requirement_level: opt_in
       - ref: gen_ai.tool.call.result
         requirement_level: opt_in
-      - ref: gen_ai.agent.interaction.type
+      - ref: gen_ai.transfer.mode
         requirement_level:
-          conditionally_required: When the instrumented framework or protocol explicitly distinguishes the tool call as a delegation or handoff to another agent.
+          conditionally_required: When the instrumented framework or protocol explicitly exposes the tool call as a transfer.
+      - ref: gen_ai.transfer.target.type
+        requirement_level:
+          conditionally_required: When `gen_ai.transfer.mode` is present.
+      - ref: gen_ai.transfer.target.name
+        requirement_level:
+          conditionally_required: When `gen_ai.transfer.mode` is present and the target name is available.
+      - ref: gen_ai.transfer.target.id
+        requirement_level:
+          conditionally_required: When `gen_ai.transfer.mode` is present and the target identifier is available.
 
   - type: gen_ai.invoke_workflow.internal
     requirement_level: recommended
