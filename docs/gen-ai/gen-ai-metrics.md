@@ -1136,8 +1136,6 @@ the metric value SHOULD be the same as the span duration.
 `gen_ai.agent.name` identifies the agent executing the tool.
 When the tool call transfers work or control, `gen_ai.transfer.*`
 records the transfer mode and target.
-Transfer mode and target attributes are independent; record each attribute
-when the corresponding value is available.
 
 **Requirement level:** [Recommended](https://github.com/open-telemetry/semantic-conventions/blob/v1.44.0/docs/general/signal-requirement-level.md).
 
@@ -1163,11 +1161,11 @@ Instrumentations SHOULD document the list of errors they report.
 **[3] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer any `gen_ai.transfer.*` attribute from span
 hierarchy, tool names, timing, or application-specific conventions.
 
-**[4] `gen_ai.transfer.target.id`:** When the target identifier is available.
+**[4] `gen_ai.transfer.target.id`:** When `gen_ai.transfer.mode` is present and the target identifier is available.
 
-**[5] `gen_ai.transfer.target.name`:** When the target name is available.
+**[5] `gen_ai.transfer.target.name`:** When `gen_ai.transfer.mode` is present and the target name is available.
 
-**[6] `gen_ai.transfer.target.type`:** When the target type is known.
+**[6] `gen_ai.transfer.target.type`:** When `gen_ai.transfer.mode` is present and the target type is known.
 
 **[7] `gen_ai.tool.type`:** Extension: A tool executed on the agent-side to directly call external APIs, bridging the gap between the agent and real-world systems.
   Agent-side operations involve actions that are performed by the agent on the server or within the agent's controlled environment.

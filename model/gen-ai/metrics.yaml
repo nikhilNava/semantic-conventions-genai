@@ -246,8 +246,6 @@ metrics:
       `gen_ai.agent.name` identifies the agent executing the tool.
       When the tool call transfers work or control, `gen_ai.transfer.*`
       records the transfer mode and target.
-      Transfer mode and target attributes are independent; record each attribute
-      when the corresponding value is available.
     instrument: histogram
     unit: "s"
     stability: development
@@ -259,13 +257,13 @@ metrics:
           conditionally_required: When the instrumented framework or protocol explicitly exposes the tool call as a transfer.
       - ref: gen_ai.transfer.target.type
         requirement_level:
-          conditionally_required: When the target type is known.
+          conditionally_required: When `gen_ai.transfer.mode` is present and the target type is known.
       - ref: gen_ai.transfer.target.name
         requirement_level:
-          conditionally_required: When the target name is available.
+          conditionally_required: When `gen_ai.transfer.mode` is present and the target name is available.
       - ref: gen_ai.transfer.target.id
         requirement_level:
-          conditionally_required: When the target identifier is available.
+          conditionally_required: When `gen_ai.transfer.mode` is present and the target identifier is available.
 
 metric_refinements:
   - id: openai.client.token.usage
