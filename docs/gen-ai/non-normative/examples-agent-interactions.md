@@ -45,9 +45,8 @@ For a transfer that does not return control to the source agent, the
 ## Agent invocation through an API or protocol
 
 When an agent invokes another agent through an API or protocol, use the existing
-`invoke_agent` CLIENT span. `gen_ai.agent.*` and
-`gen_ai.transfer.target.*` both identify the invoked agent, while
-`gen_ai.transfer.mode` describes the transfer behavior.
+`invoke_agent` CLIENT span. `gen_ai.agent.*` identifies the invoked agent;
+`gen_ai.transfer.*` is not recorded.
 
 The target process can independently record the agent's execution as an
 `invoke_agent` INTERNAL span. When trace context is propagated, that execution
@@ -57,7 +56,7 @@ can be a descendant of the CLIENT span.
 flowchart LR
   subgraph C["CALLER PROCESS"]
     C1["invoke_agent source [INTERNAL]"]
-    C2["invoke_agent target [CLIENT]<br/>agent.name = target<br/>transfer.mode = return_to_caller<br/>transfer.target.type = agent<br/>transfer.target.name = target"]
+    C2["invoke_agent target [CLIENT]<br/>agent.name = target"]
     C1 --> C2
   end
   subgraph T["TARGET PROCESS"]

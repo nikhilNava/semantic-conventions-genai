@@ -516,9 +516,7 @@ spans:
       The `gen_ai.operation.name` SHOULD be `invoke_agent`.
 
       The `gen_ai.agent.*` attributes identify the agent invoked over the remote
-      service. When the framework or protocol explicitly exposes this invocation
-      as a transfer, `gen_ai.transfer.*` records the transfer mode and target.
-      The transfer target values can match the invoked agent values.
+      service.
 
       Examples: OpenAI Assistants API, AWS Bedrock Agents.
     stability: development
@@ -550,18 +548,6 @@ spans:
         brief: The version of the invoked GenAI agent.
         requirement_level:
           conditionally_required: When available.
-      - ref: gen_ai.transfer.mode
-        requirement_level:
-          conditionally_required: When the instrumented framework or protocol explicitly exposes this invocation as a transfer.
-      - ref: gen_ai.transfer.target.type
-        requirement_level:
-          conditionally_required: When `gen_ai.transfer.mode` is present and the target type is known.
-      - ref: gen_ai.transfer.target.name
-        requirement_level:
-          conditionally_required: When `gen_ai.transfer.mode` is present and the target name is available.
-      - ref: gen_ai.transfer.target.id
-        requirement_level:
-          conditionally_required: When `gen_ai.transfer.mode` is present and the target identifier is available.
 
   - type: gen_ai.invoke_agent.internal
     requirement_level: recommended

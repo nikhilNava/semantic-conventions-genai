@@ -41,16 +41,16 @@ protocol:
 | A tool call transfers work or control | [`execute_tool`](gen-ai-spans.md#execute-tool-span) |
 | An API or protocol invokes another agent | [`invoke_agent` CLIENT](#invoke-agent-client-span) |
 
-`gen_ai.transfer.mode` records whether the initiator waits for the target and
-resumes (`return_to_caller`) or the target takes control of the remaining work
-(`pass_control`). `gen_ai.transfer.target.*` identifies the target.
-
-Record transfer attributes only when the framework or protocol exposes the
-transfer semantics and target. They MUST NOT be inferred from span hierarchy,
-tool names, timing, or application-specific conventions.
-
 On an `execute_tool` span, `gen_ai.agent.*` identifies the agent executing the
-tool. On an `invoke_agent` CLIENT span, it identifies the invoked agent.
+tool, while `gen_ai.transfer.*` describes the transfer and its target. Record
+transfer attributes only when the framework explicitly exposes those values.
+They MUST NOT be inferred from span hierarchy, tool names, timing, or
+application-specific conventions.
+
+An `invoke_agent` CLIENT span uses its existing semantics:
+`gen_ai.agent.*` identifies the invoked agent. It does not record
+`gen_ai.transfer.*`.
+
 The target agent's execution MAY independently produce an `invoke_agent`
 INTERNAL span when it is observable; such a span is not required solely to
 represent the transfer.

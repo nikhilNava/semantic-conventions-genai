@@ -77,6 +77,12 @@ def test_span_specs_are_named_as_the_registry_names_them():
         assert spec.registry_id.startswith("gen_ai."), key
 
 
+def test_invoke_agent_client_does_not_duplicate_transfer_target():
+    spec = span_specs()["invoke_agent_client"]
+    attributes = spec.required + spec.conditionally_required + spec.recommended + spec.opt_in
+    assert not any(attribute.startswith("gen_ai.transfer.") for attribute in attributes)
+
+
 def test_committed_langchain_transfer_coverage():
     entries = {entry.library: entry for entry in load_scenario_data_files()}
     langchain = entries["langchain"]
@@ -106,6 +112,7 @@ if __name__ == "__main__":
     test_events_keep_their_registry_names()
     test_span_types_absent_from_a_data_file_are_not_reported()
     test_span_specs_are_named_as_the_registry_names_them()
+    test_invoke_agent_client_does_not_duplicate_transfer_target()
     test_committed_langchain_transfer_coverage()
     test_interaction_type_is_removed_from_committed_scenarios()
     print("ok")
