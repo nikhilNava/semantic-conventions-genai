@@ -20,7 +20,7 @@ _reference_tracer = reference_tracer()
 
 class TransferSpanRecorder(SpanProcessor):
     def __init__(self):
-        self.transfers: set[tuple[str, str, str, str, str]] = set()
+        self.transfers: set[tuple[str, str, str, str]] = set()
 
     def on_start(self, span, parent_context=None):
         pass
@@ -36,7 +36,6 @@ class TransferSpanRecorder(SpanProcessor):
                 str(attributes.get("gen_ai.agent.name")),
                 str(transfer_mode),
                 str(attributes.get("gen_ai.transfer.target.name")),
-                str(attributes.get("gen_ai.transfer.target.type")),
             )
         )
 
@@ -48,7 +47,7 @@ class TransferSpanRecorder(SpanProcessor):
 
     def assert_complete(self):
         assert self.transfers == {
-            ("execute_tool", "triage-agent", "pass_control", "weather-agent", "agent"),
+            ("execute_tool", "triage-agent", "pass_control", "weather-agent"),
         }
 
 
@@ -430,7 +429,6 @@ async def run_tool_handoff_reference():
             tool_span.set_attribute("gen_ai.agent.name", source_name)
             tool_span.set_attribute("gen_ai.transfer.mode", "pass_control")
             tool_span.set_attribute("gen_ai.transfer.target.name", target_name)
-            tool_span.set_attribute("gen_ai.transfer.target.type", "agent")
             tool_span.set_attribute("gen_ai.tool.call.id", runtime.tool_call_id)
             last_ai_message = next(
                 message for message in reversed(runtime.state["messages"]) if isinstance(message, AIMessage)

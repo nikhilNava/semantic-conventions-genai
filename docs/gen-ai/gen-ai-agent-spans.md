@@ -357,14 +357,14 @@ It's NOT RECOMMENDED to record in-memory agent instance ids on this attribute du
 
 **[5] `gen_ai.transfer.mode`:** When the instrumented framework or protocol explicitly exposes this invocation as a transfer.
 
-**[6] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer this value from span hierarchy, tool names,
-timing, or application-specific conventions.
+**[6] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer any `gen_ai.transfer.*` attribute from span
+hierarchy, tool names, timing, or application-specific conventions.
 
 **[7] `gen_ai.transfer.target.id`:** When `gen_ai.transfer.mode` is present and the target identifier is available.
 
 **[8] `gen_ai.transfer.target.name`:** When `gen_ai.transfer.mode` is present and the target name is available.
 
-**[9] `gen_ai.transfer.target.type`:** When `gen_ai.transfer.mode` is present.
+**[9] `gen_ai.transfer.target.type`:** When `gen_ai.transfer.mode` is present and the target type is known.
 
 **[10] `gen_ai.conversation.id`:** If and only if the instrumented library has one readily available, or the user application provides one through OpenTelemetry context or library-specific mechanisms.
 

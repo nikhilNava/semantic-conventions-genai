@@ -21,7 +21,6 @@ _INFERENCE_CALLS = "gen_ai.invoke_agent.inference_calls"
 _TRANSFER_ATTRIBUTES = {
     "gen_ai.transfer.mode",
     "gen_ai.transfer.target.name",
-    "gen_ai.transfer.target.type",
 }
 
 
@@ -86,7 +85,11 @@ def test_committed_langchain_transfer_coverage():
     for attribute in _TRANSFER_ATTRIBUTES:
         assert execute_tool[attribute] == "present", attribute
     assert execute_tool["gen_ai.transfer.target.id"] == "absent"
+    assert execute_tool["gen_ai.transfer.target.type"] == "absent"
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in langchain.spans["invoke_agent_internal"])
+
+    for library in ("google-adk", "openai-agents"):
+        assert entries[library].spans["execute_tool"]["gen_ai.transfer.target.type"] == "present"
 
 
 def test_interaction_type_is_removed_from_committed_scenarios():

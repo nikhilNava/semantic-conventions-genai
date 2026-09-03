@@ -1158,14 +1158,14 @@ Instrumentations SHOULD document the list of errors they report.
 
 **[2] `gen_ai.transfer.mode`:** When the instrumented framework or protocol explicitly exposes the tool call as a transfer.
 
-**[3] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer this value from span hierarchy, tool names,
-timing, or application-specific conventions.
+**[3] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer any `gen_ai.transfer.*` attribute from span
+hierarchy, tool names, timing, or application-specific conventions.
 
 **[4] `gen_ai.transfer.target.id`:** When `gen_ai.transfer.mode` is present and the target identifier is available.
 
 **[5] `gen_ai.transfer.target.name`:** When `gen_ai.transfer.mode` is present and the target name is available.
 
-**[6] `gen_ai.transfer.target.type`:** When `gen_ai.transfer.mode` is present.
+**[6] `gen_ai.transfer.target.type`:** When `gen_ai.transfer.mode` is present and the target type is known.
 
 **[7] `gen_ai.tool.type`:** Extension: A tool executed on the agent-side to directly call external APIs, bridging the gap between the agent and real-world systems.
   Agent-side operations involve actions that are performed by the agent on the server or within the agent's controlled environment.

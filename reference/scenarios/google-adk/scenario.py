@@ -476,10 +476,23 @@ def run_multi_agent_delegation_reference():
         original_run_async = agent_tool.run_async
 
         async def _traced_run_async(*, args, tool_context):
+            transfer_attributes = {
+                "gen_ai.agent.name": root_agent.name,
+                "gen_ai.transfer.mode": "return_to_caller",
+                "gen_ai.transfer.target.name": specialist.name,
+                "gen_ai.transfer.target.type": "agent",
+            }
+            assert transfer_attributes == {
+                "gen_ai.agent.name": "root_agent",
+                "gen_ai.transfer.mode": "return_to_caller",
+                "gen_ai.transfer.target.name": "weather_specialist",
+                "gen_ai.transfer.target.type": "agent",
+            }
             tool_span_attributes = {
                 "gen_ai.operation.name": "execute_tool",
                 "gen_ai.tool.name": agent_tool.name,
                 "gen_ai.tool.type": "function",
+                **transfer_attributes,
             }
             start = time.perf_counter()
             error_type = None
@@ -487,12 +500,6 @@ def run_multi_agent_delegation_reference():
                 with _reference_tracer.start_as_current_span(
                     f"execute_tool {agent_tool.name}", attributes=tool_span_attributes
                 ) as tool_span:
-                    # AgentTool returns the wrapped agent's result to the caller.
-                    # Both names come from the SDK Agent objects.
-                    tool_span.set_attribute("gen_ai.agent.name", root_agent.name)
-                    tool_span.set_attribute("gen_ai.transfer.mode", "return_to_caller")
-                    tool_span.set_attribute("gen_ai.transfer.target.name", specialist.name)
-                    tool_span.set_attribute("gen_ai.transfer.target.type", "agent")
                     if tool_context.function_call_id:
                         tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
                     tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps(args))
@@ -525,10 +532,7 @@ def run_multi_agent_delegation_reference():
                 duration_attributes = {
                     "gen_ai.tool.name": agent_tool.name,
                     "gen_ai.tool.type": "function",
-                    "gen_ai.agent.name": root_agent.name,
-                    "gen_ai.transfer.mode": "return_to_caller",
-                    "gen_ai.transfer.target.name": specialist.name,
-                    "gen_ai.transfer.target.type": "agent",
+                    **transfer_attributes,
                 }
                 if error_type is not None:
                     duration_attributes["error.type"] = error_type

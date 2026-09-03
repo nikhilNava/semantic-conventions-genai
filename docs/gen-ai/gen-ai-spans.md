@@ -1187,14 +1187,14 @@ Instrumentations SHOULD document the list of errors they report.
 
 **[3] `gen_ai.transfer.mode`:** When the instrumented framework or protocol explicitly exposes the tool call as a transfer.
 
-**[4] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer this value from span hierarchy, tool names,
-timing, or application-specific conventions.
+**[4] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer any `gen_ai.transfer.*` attribute from span
+hierarchy, tool names, timing, or application-specific conventions.
 
 **[5] `gen_ai.transfer.target.id`:** When `gen_ai.transfer.mode` is present and the target identifier is available.
 
 **[6] `gen_ai.transfer.target.name`:** When `gen_ai.transfer.mode` is present and the target name is available.
 
-**[7] `gen_ai.transfer.target.type`:** When `gen_ai.transfer.mode` is present.
+**[7] `gen_ai.transfer.target.type`:** When `gen_ai.transfer.mode` is present and the target type is known.
 
 **[8] `gen_ai.tool.description`:**
 

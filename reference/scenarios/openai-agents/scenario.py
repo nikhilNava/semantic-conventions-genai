@@ -358,10 +358,23 @@ async def run_agent_as_tool_delegation():
     original_on_invoke_tool = weather_tool.on_invoke_tool
 
     async def _traced_on_invoke_tool(tool_context, input_json):
+        transfer_attributes = {
+            "gen_ai.agent.name": caller.name,
+            "gen_ai.transfer.mode": "return_to_caller",
+            "gen_ai.transfer.target.name": specialist.name,
+            "gen_ai.transfer.target.type": "agent",
+        }
+        assert transfer_attributes == {
+            "gen_ai.agent.name": "assistant",
+            "gen_ai.transfer.mode": "return_to_caller",
+            "gen_ai.transfer.target.name": "weather-specialist",
+            "gen_ai.transfer.target.type": "agent",
+        }
         tool_span_attributes = {
             "gen_ai.operation.name": "execute_tool",
             "gen_ai.tool.name": weather_tool.name,
             "gen_ai.tool.type": "function",
+            **transfer_attributes,
         }
         start = time.perf_counter()
         error_type = None
@@ -369,12 +382,6 @@ async def run_agent_as_tool_delegation():
             with _reference_tracer.start_as_current_span(
                 f"execute_tool {weather_tool.name}", attributes=tool_span_attributes
             ) as tool_span:
-                # `as_tool()` returns the nested agent's result to the caller.
-                # The source and target names come from the two SDK Agent objects.
-                tool_span.set_attribute("gen_ai.agent.name", caller.name)
-                tool_span.set_attribute("gen_ai.transfer.mode", "return_to_caller")
-                tool_span.set_attribute("gen_ai.transfer.target.name", specialist.name)
-                tool_span.set_attribute("gen_ai.transfer.target.type", "agent")
                 tool_span.set_attribute("gen_ai.tool.call.id", tool_context.tool_call_id)
                 tool_span.set_attribute("gen_ai.tool.call.arguments", input_json)
                 # This invoker call *is* the target agent's execution (`as_tool` runs it
@@ -407,10 +414,7 @@ async def run_agent_as_tool_delegation():
             duration_attributes = {
                 "gen_ai.tool.name": weather_tool.name,
                 "gen_ai.tool.type": "function",
-                "gen_ai.agent.name": caller.name,
-                "gen_ai.transfer.mode": "return_to_caller",
-                "gen_ai.transfer.target.name": specialist.name,
-                "gen_ai.transfer.target.type": "agent",
+                **transfer_attributes,
             }
             if error_type is not None:
                 duration_attributes["error.type"] = error_type

@@ -257,7 +257,7 @@ metrics:
           conditionally_required: When the instrumented framework or protocol explicitly exposes the tool call as a transfer.
       - ref: gen_ai.transfer.target.type
         requirement_level:
-          conditionally_required: When `gen_ai.transfer.mode` is present.
+          conditionally_required: When `gen_ai.transfer.mode` is present and the target type is known.
       - ref: gen_ai.transfer.target.name
         requirement_level:
           conditionally_required: When `gen_ai.transfer.mode` is present and the target name is available.

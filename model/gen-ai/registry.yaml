@@ -483,8 +483,8 @@ attributes:
           stability: development
     brief: Describes how control passes to the transfer target.
     note: |
-      Instrumentations MUST NOT infer this value from span hierarchy, tool names,
-      timing, or application-specific conventions.
+      Instrumentations MUST NOT infer any `gen_ai.transfer.*` attribute from span
+      hierarchy, tool names, timing, or application-specific conventions.
     stability: development
   - key: gen_ai.transfer.target.name
     type: string
