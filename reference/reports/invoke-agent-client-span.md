@@ -15,7 +15,6 @@
 | --- | --- |
 | gen_ai.agent.description | [openai-assistants] |
 | gen_ai.agent.id | [aws-bedrock-agent], [openai-assistants] |
-| gen_ai.agent.interaction.type | (none) |
 | gen_ai.agent.name | [azure-ai-foundry], [google-genai], [openai-assistants] |
 | gen_ai.agent.version | [aws-bedrock-agent] |
 | gen_ai.conversation.id | [aws-bedrock-agent], [openai-assistants] |
@@ -23,6 +22,10 @@
 | gen_ai.output.type | [azure-ai-foundry] |
 | gen_ai.request.choice.count | (none) |
 | gen_ai.request.seed | (none) |
+| gen_ai.transfer.mode | (none) |
+| gen_ai.transfer.target.id | (none) |
+| gen_ai.transfer.target.name | (none) |
+| gen_ai.transfer.target.type | (none) |
 | server.port | [aws-bedrock-agent], [azure-ai-foundry], [openai-assistants] |
 
 ## Recommended

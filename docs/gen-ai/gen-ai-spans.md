@@ -1138,13 +1138,11 @@ are encouraged to follow this semantic convention for tools invoked by their
 own code and to manually instrument any tool calls that automatic
 instrumentations do not cover.
 
-Some tool calls are themselves agent-directed operations: the tool exists to
-invoke or hand off to another agent. On those, `gen_ai.agent.interaction.type`
-records how the framework or protocol classifies the call, and `gen_ai.agent.name`
-MUST identify the target agent receiving the delegation or handoff. On ordinary
-`execute_tool` spans, which do not carry `gen_ai.agent.interaction.type`,
-`gen_ai.agent.name` retains its default meaning: the agent executing the tool.
-The target agent's own execution MUST NOT carry `gen_ai.agent.interaction.type`.
+Some tool calls transfer work or control to another target.
+`gen_ai.transfer.mode` records whether the agent executing the tool waits
+for a result and resumes or passes control to the target.
+`gen_ai.transfer.target.*` identifies that target. `gen_ai.agent.*` continues
+to identify the agent executing the tool.
 
 When the framework or protocol performs the transfer through a remote agent
 invocation rather than a tool execution, it is recorded as a
@@ -1153,8 +1151,7 @@ invocation rather than a tool execution, it is recorded as a
 
 These conventions do not define a caller-owned span for a dedicated in-process
 non-tool transfer. When the source and target agent executions are observable,
-each is recorded as a `gen_ai.invoke_agent` internal span without
-`gen_ai.agent.interaction.type`.
+each is recorded as a `gen_ai.invoke_agent` internal span.
 
 **Span name** SHOULD be `execute_tool {gen_ai.tool.name}`.
 
@@ -1171,13 +1168,16 @@ each is recorded as a `gen_ai.invoke_agent` internal span without
 | [`gen_ai.operation.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Required` | string | The name of the operation being performed. [1] | `chat`; `generate_content`; `text_completion` |
 | [`gen_ai.tool.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Required` | string | Name of the tool utilized by the agent. | `Flights` |
 | [`error.type`](https://github.com/open-telemetry/semantic-conventions/blob/v1.44.0/docs/registry/attributes/error.md) | ![Stable](https://img.shields.io/badge/-stable-lightgreen) | `Conditionally Required` If the operation ended in an error. | string | Describes a class of error the operation ended with. [2] | `timeout`; `java.net.UnknownHostException`; `server_certificate_invalid`; `500` |
-| [`gen_ai.agent.interaction.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [3] | string | The explicitly observed interaction type between two GenAI agents. [4] | `delegation`; `handoff` |
-| [`gen_ai.agent.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` When applicable. | string | When `gen_ai.agent.interaction.type` is present, identifies the target agent receiving the delegation or handoff; otherwise identifies the agent executing the tool. | `Math Tutor`; `Fiction Writer` |
+| [`gen_ai.agent.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` When applicable. | string | The name of the agent executing the tool. | `Math Tutor`; `Fiction Writer` |
+| [`gen_ai.transfer.mode`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [3] | string | Describes how control passes to the transfer target. [4] | `return_to_caller`; `pass_control` |
+| [`gen_ai.transfer.target.id`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [5] | string | The unique and stable identifier of the transfer target. | `agent-42`; `support-tier-2` |
+| [`gen_ai.transfer.target.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [6] | string | The human-readable name of the transfer target. | `weather_agent`; `human_support` |
+| [`gen_ai.transfer.target.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [7] | string | The type of the transfer target. | `agent`; `human`; `workflow` |
 | [`gen_ai.tool.call.id`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` If available. | string | The tool call identifier. | `call_mszuSIzqtI65i1wAUOE8w5H4` |
-| [`gen_ai.tool.description`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` If available. | string | The tool description. [5] | `Multiply two numbers` |
-| [`gen_ai.tool.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` If available. | string | Type of the tool utilized by the agent [6] | `function`; `extension`; `datastore` |
-| [`gen_ai.tool.call.arguments`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Opt-In` | any | Parameters passed to the tool call. [7] | {<br>&nbsp;&nbsp;&nbsp;&nbsp;"location": "San Francisco?",<br>&nbsp;&nbsp;&nbsp;&nbsp;"date": "2025-10-01"<br>} |
-| [`gen_ai.tool.call.result`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Opt-In` | any | The result returned by the tool call (if any and if execution was successful). [8] | {<br>&nbsp;&nbsp;"temperature_range": {<br>&nbsp;&nbsp;&nbsp;&nbsp;"high": 75,<br>&nbsp;&nbsp;&nbsp;&nbsp;"low": 60<br>&nbsp;&nbsp;},<br>&nbsp;&nbsp;"conditions": "sunny"<br>} |
+| [`gen_ai.tool.description`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` If available. | string | The tool description. [8] | `Multiply two numbers` |
+| [`gen_ai.tool.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` If available. | string | Type of the tool utilized by the agent [9] | `function`; `extension`; `datastore` |
+| [`gen_ai.tool.call.arguments`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Opt-In` | any | Parameters passed to the tool call. [10] | {<br>&nbsp;&nbsp;&nbsp;&nbsp;"location": "San Francisco?",<br>&nbsp;&nbsp;&nbsp;&nbsp;"date": "2025-10-01"<br>} |
+| [`gen_ai.tool.call.result`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Opt-In` | any | The result returned by the tool call (if any and if execution was successful). [11] | {<br>&nbsp;&nbsp;"temperature_range": {<br>&nbsp;&nbsp;&nbsp;&nbsp;"high": 75,<br>&nbsp;&nbsp;&nbsp;&nbsp;"low": 60<br>&nbsp;&nbsp;},<br>&nbsp;&nbsp;"conditions": "sunny"<br>} |
 
 **[1] `gen_ai.operation.name`:** If one of the predefined values applies, but specific system uses a different name it's RECOMMENDED to document it in the semantic conventions for specific GenAI system and use system-specific name in the instrumentation. If a different name is not documented, instrumentation libraries SHOULD use applicable predefined value.
 
@@ -1185,30 +1185,29 @@ each is recorded as a `gen_ai.invoke_agent` internal span without
 the canonical name of exception that occurred, or another low-cardinality error identifier.
 Instrumentations SHOULD document the list of errors they report.
 
-**[3] `gen_ai.agent.interaction.type`:** When the instrumented framework or protocol explicitly distinguishes the tool call as a delegation or handoff to another agent.
+**[3] `gen_ai.transfer.mode`:** When the instrumented framework or protocol explicitly exposes the tool call as a transfer.
 
-**[4] `gen_ai.agent.interaction.type`:** This attribute applies to the caller-owned operation that directs work to another
-agent: an `execute_tool` operation whose tool exists to invoke or hand off to that
-agent, or an `invoke_agent` client operation over a remote service that the framework
-or protocol explicitly classifies as a delegation or handoff. It MUST NOT be inferred
-from span hierarchy or recorded on the target agent's own execution span.
+**[4] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer this value from span hierarchy, tool names,
+timing, or application-specific conventions.
 
-When this attribute is present, `gen_ai.agent.name` on the same span or metric MUST
-identify the target agent receiving the delegation or handoff, not the agent that
-initiated it.
+**[5] `gen_ai.transfer.target.id`:** When `gen_ai.transfer.mode` is present and the target identifier is available.
 
-**[5] `gen_ai.tool.description`:**
+**[6] `gen_ai.transfer.target.name`:** When `gen_ai.transfer.mode` is present and the target name is available.
+
+**[7] `gen_ai.transfer.target.type`:** When `gen_ai.transfer.mode` is present.
+
+**[8] `gen_ai.tool.description`:**
 
 > [!WARNING]
 > This attribute may contain sensitive information.
 
-**[6] `gen_ai.tool.type`:** Extension: A tool executed on the agent-side to directly call external APIs, bridging the gap between the agent and real-world systems.
+**[9] `gen_ai.tool.type`:** Extension: A tool executed on the agent-side to directly call external APIs, bridging the gap between the agent and real-world systems.
   Agent-side operations involve actions that are performed by the agent on the server or within the agent's controlled environment.
 Function: A tool executed on the client-side, where the agent generates parameters for a predefined function, and the client executes the logic.
   Client-side operations are actions taken on the user's end or within the client application.
 Datastore: A tool used by the agent to access and query structured or unstructured external data for retrieval-augmented tasks or knowledge updates.
 
-**[7] `gen_ai.tool.call.arguments`:**
+**[10] `gen_ai.tool.call.arguments`:**
 
 > [!WARNING]
 > This attribute may contain sensitive information.
@@ -1221,7 +1220,7 @@ Instrumentations MUST follow [JSON schema](/model/gen-ai/gen-ai-tool-call-argume
 
 When the attribute is recorded on events, it MUST be recorded in structured form. When recorded on spans, it MAY be recorded as a JSON string if structured format is not supported and SHOULD be recorded in structured form otherwise.
 
-**[8] `gen_ai.tool.call.result`:**
+**[11] `gen_ai.tool.call.result`:**
 
 > [!WARNING]
 > This attribute may contain sensitive information.
@@ -1251,15 +1250,6 @@ and SHOULD be provided **at span creation time** (if provided at all):
 
 ---
 
-`gen_ai.agent.interaction.type` has the following list of well-known values. If one of them applies, then the respective value MUST be used; otherwise, a custom value MAY be used.
-
-| Value | Description | Stability |
-| --- | --- | --- |
-| `delegation` | The source agent expects control or a result to return. | ![Development](https://img.shields.io/badge/-development-blue) |
-| `handoff` | The source agent transfers ownership of the remaining work. | ![Development](https://img.shields.io/badge/-development-blue) |
-
----
-
 `gen_ai.operation.name` has the following list of well-known values. If one of them applies, then the respective value MUST be used; otherwise, a custom value MAY be used.
 
 | Value | Description | Stability |
@@ -1272,7 +1262,7 @@ and SHOULD be provided **at span creation time** (if provided at all):
 | `delete_memory_store` | Delete or deprovision a memory store | ![Development](https://img.shields.io/badge/-development-blue) |
 | `embeddings` | Embeddings operation such as [OpenAI Create embeddings API](https://platform.openai.com/docs/api-reference/embeddings/create) | ![Development](https://img.shields.io/badge/-development-blue) |
 | `execute_tool` | Execute a tool | ![Development](https://img.shields.io/badge/-development-blue) |
-| `fetch_response` | Fetch a previously generated model response by its identifier, without performing inference, such as [OpenAI Get a model response](https://platform.openai.com/docs/api-reference/responses/get) [9] | ![Development](https://img.shields.io/badge/-development-blue) |
+| `fetch_response` | Fetch a previously generated model response by its identifier, without performing inference, such as [OpenAI Get a model response](https://platform.openai.com/docs/api-reference/responses/get) [12] | ![Development](https://img.shields.io/badge/-development-blue) |
 | `generate_content` | Multimodal content generation operation such as [Gemini Generate Content](https://ai.google.dev/api/generate-content) | ![Development](https://img.shields.io/badge/-development-blue) |
 | `invoke_agent` | Invoke GenAI agent | ![Development](https://img.shields.io/badge/-development-blue) |
 | `invoke_workflow` | Invoke GenAI workflow | ![Development](https://img.shields.io/badge/-development-blue) |
@@ -1283,7 +1273,26 @@ and SHOULD be provided **at span creation time** (if provided at all):
 | `update_memory` | Update existing memory records | ![Development](https://img.shields.io/badge/-development-blue) |
 | `upsert_memory` | Create or update memory records without the caller choosing which | ![Development](https://img.shields.io/badge/-development-blue) |
 
-**[9]:** Instrumentations SHOULD NOT report token usage (as attributes or metrics) for this operation.
+**[12]:** Instrumentations SHOULD NOT report token usage (as attributes or metrics) for this operation.
+
+---
+
+`gen_ai.transfer.mode` has the following list of well-known values. If one of them applies, then the respective value MUST be used; otherwise, a custom value MAY be used.
+
+| Value | Description | Stability |
+| --- | --- | --- |
+| `pass_control` | The target takes control of the remaining work. | ![Development](https://img.shields.io/badge/-development-blue) |
+| `return_to_caller` | The initiator waits for the target to finish and then resumes execution. | ![Development](https://img.shields.io/badge/-development-blue) |
+
+---
+
+`gen_ai.transfer.target.type` has the following list of well-known values. If one of them applies, then the respective value MUST be used; otherwise, a custom value MAY be used.
+
+| Value | Description | Stability |
+| --- | --- | --- |
+| `agent` | A GenAI agent. | ![Development](https://img.shields.io/badge/-development-blue) |
+| `human` | A person or group of people. | ![Development](https://img.shields.io/badge/-development-blue) |
+| `workflow` | A workflow or workflow step. | ![Development](https://img.shields.io/badge/-development-blue) |
 
 <!-- prettier-ignore-end -->
 <!-- END AUTOGENERATED TEXT -->

@@ -9,7 +9,6 @@
 | --- | --- | --- | --- | --- |
 | <a id="gen-ai-agent-description" href="#gen-ai-agent-description">`gen_ai.agent.description`</a> | ![Development](https://img.shields.io/badge/-development-blue) | string | Free-form description of the GenAI agent provided by the application. | `Helps with math problems`; `Generates fiction stories` |
 | <a id="gen-ai-agent-id" href="#gen-ai-agent-id">`gen_ai.agent.id`</a> | ![Development](https://img.shields.io/badge/-development-blue) | string | The unique and stable identifier of the GenAI hosted agent resource. [1] | `asst_5j66UpCpwteGg4YSxUnt7lPY`; `arn:aws:bedrock:us-east-1:123:agent/42`; `urn:agent:projects-123:projects:123:locations:us-east1:aiplatform:reasoningEngines:456` |
-| <a id="gen-ai-agent-interaction-type" href="#gen-ai-agent-interaction-type">`gen_ai.agent.interaction.type`</a> | ![Development](https://img.shields.io/badge/-development-blue) | string | The explicitly observed interaction type between two GenAI agents. [2] | `delegation`; `handoff` |
 | <a id="gen-ai-agent-name" href="#gen-ai-agent-name">`gen_ai.agent.name`</a> | ![Development](https://img.shields.io/badge/-development-blue) | string | Human-readable name of the GenAI agent provided by the application. | `Math Tutor`; `Fiction Writer` |
 | <a id="gen-ai-agent-version" href="#gen-ai-agent-version">`gen_ai.agent.version`</a> | ![Development](https://img.shields.io/badge/-development-blue) | string | The version of the GenAI agent. | `1.0.0`; `2025-05-01` |
 | <a id="gen-ai-conversation-compacted" href="#gen-ai-conversation-compacted">`gen_ai.conversation.compacted`</a> | ![Development](https://img.shields.io/badge/-development-blue) | boolean | Indicates whether the effective conversation context used for this operation is a compacted view of a prior conversation. [3] | `true` |
@@ -65,6 +64,10 @@
 | <a id="gen-ai-tool-description" href="#gen-ai-tool-description">`gen_ai.tool.description`</a> | ![Development](https://img.shields.io/badge/-development-blue) | string | The tool description. [31] | `Multiply two numbers` |
 | <a id="gen-ai-tool-name" href="#gen-ai-tool-name">`gen_ai.tool.name`</a> | ![Development](https://img.shields.io/badge/-development-blue) | string | Name of the tool utilized by the agent. | `Flights` |
 | <a id="gen-ai-tool-type" href="#gen-ai-tool-type">`gen_ai.tool.type`</a> | ![Development](https://img.shields.io/badge/-development-blue) | string | Type of the tool utilized by the agent [32] | `function`; `extension`; `datastore` |
+| <a id="gen-ai-transfer-mode" href="#gen-ai-transfer-mode">`gen_ai.transfer.mode`</a> | ![Development](https://img.shields.io/badge/-development-blue) | string | Describes how control passes to the transfer target. [2] | `return_to_caller`; `pass_control` |
+| <a id="gen-ai-transfer-target-id" href="#gen-ai-transfer-target-id">`gen_ai.transfer.target.id`</a> | ![Development](https://img.shields.io/badge/-development-blue) | string | The unique and stable identifier of the transfer target. | `agent-42`; `support-tier-2` |
+| <a id="gen-ai-transfer-target-name" href="#gen-ai-transfer-target-name">`gen_ai.transfer.target.name`</a> | ![Development](https://img.shields.io/badge/-development-blue) | string | The human-readable name of the transfer target. | `weather_agent`; `human_support` |
+| <a id="gen-ai-transfer-target-type" href="#gen-ai-transfer-target-type">`gen_ai.transfer.target.type`</a> | ![Development](https://img.shields.io/badge/-development-blue) | string | The type of the transfer target. | `agent`; `human`; `workflow` |
 | <a id="gen-ai-usage-audio-cache-read-input-tokens" href="#gen-ai-usage-audio-cache-read-input-tokens">`gen_ai.usage.audio.cache_read.input_tokens`</a> | ![Development](https://img.shields.io/badge/-development-blue) | int | The number of audio input tokens served from a provider-managed cache. [33] | `60` |
 | <a id="gen-ai-usage-audio-input-tokens" href="#gen-ai-usage-audio-input-tokens">`gen_ai.usage.audio.input_tokens`</a> | ![Development](https://img.shields.io/badge/-development-blue) | int | The number of audio input tokens. [34] | `120` |
 | <a id="gen-ai-usage-audio-output-tokens" href="#gen-ai-usage-audio-output-tokens">`gen_ai.usage.audio.output_tokens`</a> | ![Development](https://img.shields.io/badge/-development-blue) | int | The number of audio output tokens. [35] | `240` |
@@ -85,15 +88,8 @@
 **[1] `gen_ai.agent.id`:** For hosted agents, this SHOULD be the provider-assigned stable identifier of the agent resource such as [AWS Bedrock agent ARN](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent_Agent.html) or [GCP Agent Registry identifier](https://docs.cloud.google.com/agent-registry/concepts#agent-identifier).
 It's NOT RECOMMENDED to record in-memory agent instance ids on this attribute due to their transient nature.
 
-**[2] `gen_ai.agent.interaction.type`:** This attribute applies to the caller-owned operation that directs work to another
-agent: an `execute_tool` operation whose tool exists to invoke or hand off to that
-agent, or an `invoke_agent` client operation over a remote service that the framework
-or protocol explicitly classifies as a delegation or handoff. It MUST NOT be inferred
-from span hierarchy or recorded on the target agent's own execution span.
-
-When this attribute is present, `gen_ai.agent.name` on the same span or metric MUST
-identify the target agent receiving the delegation or handoff, not the agent that
-initiated it.
+**[2] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer this value from span hierarchy, tool names,
+timing, or application-specific conventions.
 
 **[3] `gen_ai.conversation.compacted`:** This attribute is a positive indicator of context compaction. Instrumentations
 SHOULD set it to `true` only when they can reliably determine that context
@@ -397,15 +393,6 @@ what `gen_ai.workflow.name` means in the context of that framework.
 
 ---
 
-`gen_ai.agent.interaction.type` has the following list of well-known values. If one of them applies, then the respective value MUST be used; otherwise, a custom value MAY be used.
-
-| Value | Description | Stability |
-| --- | --- | --- |
-| `delegation` | The source agent expects control or a result to return. | ![Development](https://img.shields.io/badge/-development-blue) |
-| `handoff` | The source agent transfers ownership of the remaining work. | ![Development](https://img.shields.io/badge/-development-blue) |
-
----
-
 `gen_ai.operation.name` has the following list of well-known values. If one of them applies, then the respective value MUST be used; otherwise, a custom value MAY be used.
 
 | Value | Description | Stability |
@@ -492,3 +479,22 @@ what `gen_ai.workflow.name` means in the context of that framework.
 | --- | --- | --- |
 | `input` | Input tokens (prompt, input, etc.) | ![Development](https://img.shields.io/badge/-development-blue) |
 | `output` | Output tokens (completion, response, etc.) | ![Development](https://img.shields.io/badge/-development-blue) |
+
+---
+
+`gen_ai.transfer.mode` has the following list of well-known values. If one of them applies, then the respective value MUST be used; otherwise, a custom value MAY be used.
+
+| Value | Description | Stability |
+| --- | --- | --- |
+| `pass_control` | The target takes control of the remaining work. | ![Development](https://img.shields.io/badge/-development-blue) |
+| `return_to_caller` | The initiator waits for the target to finish and then resumes execution. | ![Development](https://img.shields.io/badge/-development-blue) |
+
+---
+
+`gen_ai.transfer.target.type` has the following list of well-known values. If one of them applies, then the respective value MUST be used; otherwise, a custom value MAY be used.
+
+| Value | Description | Stability |
+| --- | --- | --- |
+| `agent` | A GenAI agent. | ![Development](https://img.shields.io/badge/-development-blue) |
+| `human` | A person or group of people. | ![Development](https://img.shields.io/badge/-development-blue) |
+| `workflow` | A workflow or workflow step. | ![Development](https://img.shields.io/badge/-development-blue) |
