@@ -18,6 +18,11 @@ from semconv_genai.semconv_model import metric_specs, span_specs
 
 _TOOL_CALLS = "gen_ai.invoke_agent.tool_calls"
 _INFERENCE_CALLS = "gen_ai.invoke_agent.inference_calls"
+_TRANSFER_ATTRIBUTES = {
+    "gen_ai.transfer.mode",
+    "gen_ai.transfer.target.name",
+    "gen_ai.transfer.target.type",
+}
 
 
 def test_metric_specs_expose_recommended_agent_name():
@@ -73,21 +78,24 @@ def test_span_specs_are_named_as_the_registry_names_them():
         assert spec.registry_id.startswith("gen_ai."), key
 
 
-def test_committed_langchain_agent_interaction_coverage():
+def test_committed_langchain_transfer_coverage():
     entries = {entry.library: entry for entry in load_scenario_data_files()}
     langchain = entries["langchain"]
+    execute_tool = langchain.spans["execute_tool"]
 
-    assert langchain.spans["execute_tool"]["gen_ai.agent.interaction.type"] == "present"
-    assert "gen_ai.agent.interaction.type" not in langchain.spans["invoke_agent_internal"]
-
-
-def test_committed_openai_agents_internal_spans_have_no_interaction_type():
-    data = json.loads(
-        (Path(__file__).parents[1] / "scenarios" / "openai-agents" / "data.json").read_text(encoding="utf-8")
+    for attribute in _TRANSFER_ATTRIBUTES:
+        assert execute_tool[attribute] == "present", attribute
+    assert "gen_ai.transfer.target.id" not in execute_tool
+    assert not any(
+        attribute.startswith("gen_ai.transfer.")
+        for attribute in langchain.spans["invoke_agent_internal"]
     )
-    attributes = data["spans"]["gen_ai.invoke_agent.internal"]
 
-    assert "gen_ai.agent.interaction.type" not in attributes
+
+def test_interaction_type_is_removed_from_committed_scenarios():
+    for path in (Path(__file__).parents[1] / "scenarios").glob("*/data.json"):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert "gen_ai.agent.interaction.type" not in json.dumps(data), path
 
 
 if __name__ == "__main__":
@@ -98,6 +106,6 @@ if __name__ == "__main__":
     test_events_keep_their_registry_names()
     test_span_types_absent_from_a_data_file_are_not_reported()
     test_span_specs_are_named_as_the_registry_names_them()
-    test_committed_langchain_agent_interaction_coverage()
-    test_committed_openai_agents_internal_spans_have_no_interaction_type()
+    test_committed_langchain_transfer_coverage()
+    test_interaction_type_is_removed_from_committed_scenarios()
     print("ok")
