@@ -10,13 +10,13 @@ linkTitle: Agent spans
 
 - [Semantic Conventions for GenAI agent and framework spans](#semantic-conventions-for-genai-agent-and-framework-spans)
   - [Spans](#spans)
-    - [Agent-to-agent interactions](#agent-to-agent-interactions)
     - [Create agent span](#create-agent-span)
     - [Invoke agent client span](#invoke-agent-client-span)
     - [Invoke agent internal span](#invoke-agent-internal-span)
     - [Invoke workflow span](#invoke-workflow-span)
     - [Plan span](#plan-span)
   - [Execute tool span](#execute-tool-span)
+  - [Agent-to-agent interactions](#agent-to-agent-interactions)
 
 <!-- tocstop -->
 
@@ -29,34 +29,6 @@ It MAY be applicable to agent operations that are performed by the GenAI framewo
 The semantic conventions for GenAI agents extend and override the semantic conventions for [Gen AI Spans](gen-ai-spans.md).
 
 ## Spans
-
-### Agent-to-agent interactions
-
-When an agent directs work or passes control to another agent, use the span
-that corresponds to the operation exposed by the instrumented framework or
-protocol:
-
-| Framework or protocol operation | Caller-owned span |
-| --- | --- |
-| A tool call transfers work or control | [`execute_tool`](gen-ai-spans.md#execute-tool-span) |
-| An API or protocol invokes another agent | [`invoke_agent` CLIENT](#invoke-agent-client-span) |
-
-On an `execute_tool` span, `gen_ai.agent.*` identifies the agent executing the
-tool, while `gen_ai.transfer.*` describes the transfer and its target. Record
-transfer attributes only when the framework explicitly exposes those values.
-They MUST NOT be inferred from span hierarchy, tool names, timing, or
-application-specific conventions.
-
-An `invoke_agent` CLIENT span uses its existing semantics:
-`gen_ai.agent.*` identifies the invoked agent. It does not record
-`gen_ai.transfer.*`.
-
-The target agent's execution MAY independently produce an `invoke_agent`
-INTERNAL span when it is observable; such a span is not required solely to
-represent the transfer.
-
-See [agent-to-agent interaction examples](non-normative/examples-agent-interactions.md)
-for example trace topologies and attribute values.
 
 ### Create agent span
 
@@ -1121,5 +1093,33 @@ and SHOULD be provided **at span creation time** (if provided at all):
 ## Execute tool span
 
 If you are using some tools in your agent, refer to [Execute Tool Span](./gen-ai-spans.md#execute-tool-span).
+
+## Agent-to-agent interactions
+
+When an agent directs work or passes control to another agent, use the span
+that corresponds to the operation exposed by the instrumented framework or
+protocol:
+
+| Framework or protocol operation | Caller-owned span |
+| --- | --- |
+| A tool call transfers work or control | [`execute_tool`](gen-ai-spans.md#execute-tool-span) |
+| An API or protocol invokes another agent | [`invoke_agent` CLIENT](#invoke-agent-client-span) |
+
+On an `execute_tool` span, `gen_ai.agent.*` identifies the agent executing the
+tool, while `gen_ai.transfer.*` describes the transfer and its target. Record
+transfer attributes only when the framework explicitly exposes those values.
+They MUST NOT be inferred from span hierarchy, tool names, timing, or
+application-specific conventions.
+
+An `invoke_agent` CLIENT span uses its existing semantics:
+`gen_ai.agent.*` identifies the invoked agent. It does not record
+`gen_ai.transfer.*`.
+
+The target agent's execution MAY independently produce an `invoke_agent`
+INTERNAL span when it is observable; such a span is not required solely to
+represent the transfer.
+
+See [agent-to-agent interaction examples](non-normative/examples-agent-interactions.md)
+for example trace topologies and attribute values.
 
 [DocumentStatus]: https://opentelemetry.io/docs/specs/otel/document-status
