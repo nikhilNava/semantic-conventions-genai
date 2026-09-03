@@ -1,169 +1,23 @@
 """Reference implementation for OpenAI Agents.
 
-Exercises agent execution, tool calling, agent-as-tool delegation, native handoff,
-and a multi-agent workflow against a mock OpenAI server, with manual OTel spans.
+Exercises: agent run with tool calling and a multi-agent run with handoffs
+wrapped in a workflow span, against a mock OpenAI server, with manual OTel spans.
 """
 
 import asyncio
 import contextlib
 import json
 import os
-import time
 
 import openai
-from agents import Agent, RunConfig, Runner, function_tool, handoff
+from agents import Agent, RunConfig, Runner, function_tool
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from agents.tool import FunctionTool, ToolContext
-from opentelemetry import context as _context
-from opentelemetry import trace as _trace
-from reference_shared import flush_and_shutdown, reference_meter, reference_tracer, setup_otel
+from reference_shared import flush_and_shutdown, reference_tracer, setup_otel
 
 MOCK_BASE_URL = os.environ["MOCK_LLM_URL"] + "/v1"
 
 _reference_tracer = reference_tracer()
-_reference_meter = reference_meter()
-
-# `gen_ai.execute_tool.duration` is recorded once per tool execution this scenario
-# instruments, next to that execution's `execute_tool` span. Transfer attributes
-# remain span-only.
-# A native handoff is not a tool execution, so it records no point here. Every site records `error.type`
-# (conditionally required per model/gen-ai/metrics.yaml) when the execution it
-# times raises, derived from the exception's class name and never swallowed.
-_execute_tool_duration = _reference_meter.create_histogram(
-    "gen_ai.execute_tool.duration",
-    unit="s",
-    description="The duration of a single tool execution.",
-)
-
-# `gen_ai.invoke_agent.duration` measures an agent's own execution, so it is recorded
-# once per logical agent execution, next to that execution's `invoke_agent` span.
-_invoke_agent_duration = _reference_meter.create_histogram(
-    "gen_ai.invoke_agent.duration",
-    unit="s",
-    description="The end-to-end duration of a single in-process agent invocation.",
-)
-
-
-@contextlib.contextmanager
-def _invoke_agent_execution_spans(*, request_model, input_text):
-    """Bound each *logical* agent execution inside one public ``Runner.run`` with a
-    single ``invoke_agent <agent.name>`` span, then restore the patched seam on exit.
-
-    A native handoff switches the active agent mid-run, so one ``Runner.run`` covers
-    two logical agent executions. The SDK exposes no public per-execution boundary,
-    so this patches its private per-turn function ``agents.run.run_single_turn`` and
-    keeps the state needed to derive the boundary: the span stays open across every
-    consecutive turn of the same agent and is replaced only when the active agent
-    changes, so a multi-turn execution is not split into one span per turn. Patching
-    a private seam is allowed; the scenario's entry point stays the public
-    ``Runner.run`` and this seam is never called directly.
-
-    Every execution of one ``Runner.run`` belongs to a single trace. When the active
-    agent changes, the next agent execution remains a descendant of the run's first
-    execution, so the executions share one trace instead of starting a new one.
-
-    ``input_text`` is the user's message, which is the input to the first (source)
-    execution only. Each executing agent's own response goes on its own span, and no
-    execution span carries ``gen_ai.transfer.*``.
-
-    Each execution's ``gen_ai.invoke_agent.duration`` point is recorded here, where the
-    execution ends, so the two executions of one handoff run produce one point each.
-    A turn that raises ends its own execution's point with ``error.type`` set
-    (conditionally required per
-    model/gen-ai/metrics.yaml) and the exception still propagates -- a failed source
-    or target execution is timed and classified, never swallowed.
-    """
-    import agents.run
-
-    original_run_single_turn = agents.run.run_single_turn
-    # `run_context` starts as the context this `Runner.run` is entered with and is
-    # upgraded to the first execution span below, so it is a stable, non-empty
-    # parent for the rest of the run. It lives in this generator call, so one run
-    # never inherits the context of another.
-    execution = {
-        "span": None,
-        "agent_name": None,
-        "started": False,
-        "started_at": None,
-        "run_context": _context.get_current(),
-    }
-
-    def end_execution(error_type=None):
-        """End the open execution span and record its duration point, at most once.
-
-        ``error_type`` is set only when the execution ended because its own turn
-        raised, so a failed source or target execution still records
-        ``error.type`` on this metric (conditionally required per
-        model/gen-ai/metrics.yaml), matching ADK's own ``resolve_error_type``
-        fallback to the exception's class name.
-        """
-        if execution["span"] is None:
-            return
-        execution["span"].end()
-        duration_attributes = {"gen_ai.agent.name": execution["agent_name"], "gen_ai.request.model": request_model}
-        if error_type is not None:
-            duration_attributes["error.type"] = error_type
-        _invoke_agent_duration.record(time.perf_counter() - execution["started_at"], duration_attributes)
-        execution["span"] = None
-
-    async def _traced_run_single_turn(**kwargs):
-        executing_agent = kwargs["bindings"].public_agent
-        if execution["agent_name"] != executing_agent.name:
-            end_execution()
-            agent_span_attributes = {
-                "gen_ai.operation.name": "invoke_agent",
-                "gen_ai.request.model": request_model,
-                "gen_ai.agent.name": executing_agent.name,
-            }
-            agent_span = _reference_tracer.start_span(
-                f"invoke_agent {executing_agent.name}",
-                context=execution["run_context"],
-                attributes=agent_span_attributes,
-            )
-            if not execution["started"]:
-                # The first execution roots this run's trace, so later executions
-                # fall back to it and stay in the same trace.
-                execution["run_context"] = _trace.set_span_in_context(agent_span, execution["run_context"])
-                # The user's message is the input to the first (source) execution only.
-                agent_span.set_attribute(
-                    "gen_ai.input.messages",
-                    json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}]),
-                )
-            execution.update(
-                span=agent_span,
-                agent_name=executing_agent.name,
-                started=True,
-                started_at=time.perf_counter(),
-            )
-
-        agent_span = execution["span"]
-        with _trace.use_span(agent_span, end_on_exit=False):
-            try:
-                turn_result = await original_run_single_turn(**kwargs)
-            except Exception as e:
-                # This turn is the currently executing agent's own execution (source
-                # or target), so its failure ends that execution here and now, with
-                # a low-cardinality error identifier for the duration metric.
-                end_execution(error_type=type(e).__qualname__)
-                raise
-            # Only a final-output step exposes `.output` (a handoff step exposes
-            # `.new_agent`); the executing agent's own response goes on its own span,
-            # never on the span of the agent that handed the work over.
-            next_step = turn_result.next_step
-            if hasattr(next_step, "output"):
-                agent_span.set_attribute(
-                    "gen_ai.output.messages",
-                    json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(next_step.output)}]}]),
-                )
-            return turn_result
-
-    agents.run.run_single_turn = _traced_run_single_turn
-    try:
-        yield
-    finally:
-        agents.run.run_single_turn = original_run_single_turn
-        # In `finally` so a failed execution is still ended and still timed.
-        end_execution()
 
 
 @contextlib.contextmanager
@@ -190,37 +44,17 @@ def get_weather(ctx: ToolContext[None], location: str) -> str:
         "gen_ai.tool.name": "get_weather",
         "gen_ai.tool.type": "function",
     }
-    # The agent executing the tool, known before the call: the span attribute
-    # and the duration metric below both report it. An ordinary tool call is
-    # not an agent interaction, so neither carries an interaction type.
-    executing_agent_name = ctx.agent.name if ctx.agent is not None else None
-    duration_attributes = {"gen_ai.tool.name": "get_weather", "gen_ai.tool.type": "function"}
-    if executing_agent_name:
-        duration_attributes["gen_ai.agent.name"] = executing_agent_name
-    start = time.perf_counter()
-    error_type = None
-    try:
-        with _reference_tracer.start_as_current_span(
-            "execute_tool get_weather", attributes=tool_span_attributes
-        ) as tool_span:
-            tool_span.set_attribute("gen_ai.tool.description", get_weather.description)
-            if executing_agent_name:
-                tool_span.set_attribute("gen_ai.agent.name", executing_agent_name)
-            tool_span.set_attribute("gen_ai.tool.call.id", ctx.tool_call_id)
-            tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps({"location": location}))
-            result = "Sunny, 72°F"
-            tool_span.set_attribute("gen_ai.tool.call.result", result)
-            return result
-    except Exception as e:
-        # Low-cardinality error identifier for the duration metric, matching ADK's
-        # own `resolve_error_type` fallback to the exception's class name.
-        error_type = type(e).__qualname__
-        raise
-    finally:
-        # Record in `finally` so a failed tool execution is still timed.
-        if error_type is not None:
-            duration_attributes["error.type"] = error_type
-        _execute_tool_duration.record(time.perf_counter() - start, duration_attributes)
+    with _reference_tracer.start_as_current_span(
+        "execute_tool get_weather", attributes=tool_span_attributes
+    ) as tool_span:
+        tool_span.set_attribute("gen_ai.tool.description", get_weather.description)
+        if ctx.agent is not None and ctx.agent.name:
+            tool_span.set_attribute("gen_ai.agent.name", ctx.agent.name)
+        tool_span.set_attribute("gen_ai.tool.call.id", ctx.tool_call_id)
+        tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps({"location": location}))
+        result = "Sunny, 72°F"
+        tool_span.set_attribute("gen_ai.tool.call.result", result)
+        return result
 
 
 async def run_agent():
@@ -309,31 +143,9 @@ async def run_agent():
 async def run_agent_as_tool_delegation():
     """Delegation: a caller agent invokes another agent exposed via `Agent.as_tool`.
 
-    `Agent.as_tool()` is the SDK's explicit agent-as-tool API: the caller invokes
-    the target agent as a function tool and, per its docstring, "the conversation
-    is continued by the original agent" -- the caller expects a result back.
-    This maps directly to `return_to_caller`, without inference from arguments.
-
-    Two agents really execute here, and each logical execution gets exactly one
-    span:
-
-    * `invoke_agent assistant` wraps the public `Runner.run(caller, ...)` call --
-      one logical invocation of the caller, however many turns it takes -- and
-      owns the user's input and the caller's own final response.
-    * `invoke_agent weather-specialist` wraps the delegated invoker call, which is
-      what actually runs the target agent (`Agent.as_tool` invokes it through its
-      own nested `Runner.run`). It is nested under the caller-owned
-      `execute_tool weather-specialist` span and carries the target's response.
-      Being the target's own execution, it stays free of `gen_ai.transfer.*`.
-      Those attributes live on the caller-owned `execute_tool` span. Its
-      `gen_ai.input.messages` is
-      an honest omission: the invoker seam exposes the delegated input only as the
-      tool's raw argument JSON, which the caller-owned `execute_tool` span already
-      records verbatim as `gen_ai.tool.call.arguments`; the target's message list
-      is built inside the nested `Runner.run` and never surfaces here.
-
-    The delegated agent's model call belongs to the `openai` library, so no
-    inference span is emitted here.
+    `Agent.as_tool()` runs the target agent as a function tool and returns its
+    result to the original agent. The caller-owned `execute_tool` span records
+    the transfer; the child `invoke_agent` span records the target's execution.
     """
     client = openai.AsyncOpenAI(base_url=MOCK_BASE_URL, api_key="mock-key")
     request_model = "gpt-4o-mini"
@@ -374,49 +186,26 @@ async def run_agent_as_tool_delegation():
             "gen_ai.tool.type": "function",
             **transfer_attributes,
         }
-        start = time.perf_counter()
-        error_type = None
-        try:
-            with _reference_tracer.start_as_current_span(
-                f"execute_tool {weather_tool.name}", attributes=tool_span_attributes
-            ) as tool_span:
-                tool_span.set_attribute("gen_ai.tool.call.id", tool_context.tool_call_id)
-                tool_span.set_attribute("gen_ai.tool.call.arguments", input_json)
-                # This invoker call *is* the target agent's execution (`as_tool` runs it
-                # through its own nested `Runner.run`), so the target's single execution
-                # span wraps it. Transfer attributes stay on the caller's tool span.
-                target_span_attributes = {
-                    "gen_ai.operation.name": "invoke_agent",
-                    "gen_ai.request.model": request_model,
-                    "gen_ai.agent.name": specialist.name,
-                }
-                with _reference_tracer.start_as_current_span(
-                    f"invoke_agent {specialist.name}", attributes=target_span_attributes
-                ) as target_span:
-                    result = await original_on_invoke_tool(tool_context, input_json)
-                    # Success-only: set the response only after the call returns, so a
-                    # failure never manufactures a fabricated output.
-                    target_span.set_attribute(
-                        "gen_ai.output.messages",
-                        json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(result)}]}]),
-                    )
-                tool_span.set_attribute("gen_ai.tool.call.result", str(result))
-            return result
-        except Exception as e:
-            # Low-cardinality error identifier for the duration metric, matching ADK's
-            # own `resolve_error_type` fallback to the exception's class name.
-            error_type = type(e).__qualname__
-            raise
-        finally:
-            # Record in `finally` so a failed transfer is still timed.
-            duration_attributes = {
-                "gen_ai.agent.name": caller.name,
-                "gen_ai.tool.name": weather_tool.name,
-                "gen_ai.tool.type": "function",
+        with _reference_tracer.start_as_current_span(
+            f"execute_tool {weather_tool.name}", attributes=tool_span_attributes
+        ) as tool_span:
+            tool_span.set_attribute("gen_ai.tool.call.id", tool_context.tool_call_id)
+            tool_span.set_attribute("gen_ai.tool.call.arguments", input_json)
+            target_span_attributes = {
+                "gen_ai.operation.name": "invoke_agent",
+                "gen_ai.request.model": request_model,
+                "gen_ai.agent.name": specialist.name,
             }
-            if error_type is not None:
-                duration_attributes["error.type"] = error_type
-            _execute_tool_duration.record(time.perf_counter() - start, duration_attributes)
+            with _reference_tracer.start_as_current_span(
+                f"invoke_agent {specialist.name}", attributes=target_span_attributes
+            ) as target_span:
+                result = await original_on_invoke_tool(tool_context, input_json)
+                target_span.set_attribute(
+                    "gen_ai.output.messages",
+                    json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(result)}]}]),
+                )
+            tool_span.set_attribute("gen_ai.tool.call.result", str(result))
+        return result
 
     caller = Agent(
         name="assistant",
@@ -456,63 +245,10 @@ async def run_agent_as_tool_delegation():
     print(f"    -> {str(result.final_output)[:60]}")
 
 
-async def run_agent_handoff():
-    """Handoff: a caller agent transfers control to another agent via `handoff`.
-
-    `handoff()` is the SDK's explicit handoff API, and it is *not* an ordinary tool
-    execution: the SDK gives it its own `Handoff` object and its own invoker
-    (`on_invoke_handoff`), whose whole purpose is to switch the active agent so the
-    target owns the remaining work. The generated `transfer_to_<agent>` name the
-    model sees is a prompt-level artifact, not a tool execution.
-
-    Two agents really execute under one public `Runner.run(triage_agent, ...)`
-    call, and each logical execution gets exactly one span:
-
-    * `invoke_agent triage-agent` bounds the source agent's whole execution
-      (every turn it takes before the switch) and owns the user's input.
-    * `invoke_agent billing-agent` bounds the target agent's whole execution after
-      the switch and carries that agent's response.
-
-    The SDK has no public per-execution boundary, so `_invoke_agent_execution_spans`
-    derives it from the active agent changing across the private `run_single_turn`
-    seam, while the scenario's entry point stays the public `Runner.run`.
-
-    The convention has no caller-owned INTERNAL span for this non-tool handoff, so
-    the scenario does not emit `gen_ai.transfer.*`. This is an honest
-    capture gap rather than remapping the SDK's dedicated handoff to `execute_tool`.
-    """
-    client = openai.AsyncOpenAI(base_url=MOCK_BASE_URL, api_key="mock-key")
-    request_model = "gpt-4o-mini"
-    model = OpenAIChatCompletionsModel(model=request_model, openai_client=client)
-
-    billing_agent = Agent(
-        name="billing-agent",
-        instructions="You handle billing questions.",
-        model=model,
-    )
-    billing_handoff = handoff(billing_agent)
-
-    triage_agent = Agent(
-        name="triage-agent",
-        instructions="You route the user to the correct specialist agent.",
-        model=model,
-        handoffs=[billing_handoff],
-    )
-    input_text = "I have a question about my bill."
-
-    print("  [handoff] native handoff via handoff() (reference implementation)")
-    # The execution seam gives the source (triage) and target (billing) one span
-    # each while the scenario continues to use the public `Runner.run` entry point.
-    with _invoke_agent_execution_spans(
-        request_model=request_model,
-        input_text=input_text,
-    ):
-        result = await Runner.run(triage_agent, input_text)
-    print(f"    -> {str(result.final_output)[:60]}")
-
-
 async def run_workflow():
     """Run a multi-agent handoff wrapped in a workflow span representing the SDK workflow tracing."""
+    from agents import handoff
+
     client = openai.AsyncOpenAI(base_url=MOCK_BASE_URL, api_key="mock-key")
     request_model = "gpt-4o-mini"
     model = OpenAIChatCompletionsModel(model=request_model, openai_client=client)
@@ -567,7 +303,6 @@ def main():
 
     asyncio.run(run_agent())
     asyncio.run(run_agent_as_tool_delegation())
-    asyncio.run(run_agent_handoff())
     asyncio.run(run_workflow())
 
     flush_and_shutdown(tp, lp, mp)

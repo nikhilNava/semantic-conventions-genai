@@ -30,18 +30,6 @@ _tool_calls = _reference_meter.create_histogram(
     unit="{tool_call}",
     description="The number of tool calls a GenAI agent makes during a single invocation.",
 )
-# `gen_ai.execute_tool.duration` is recorded once per tool execution this scenario
-# instruments, next to that execution's `execute_tool` span (ADK's own instrument for
-# the same metric is suppressed in `_suppress_adk_native_telemetry`).
-# Transfer attributes remain span-only.
-# Every site records `error.type` (conditionally required per model/gen-ai/metrics.yaml)
-# when the execution it times raises, derived from the exception's class name -- matching
-# ADK's own `resolve_error_type` fallback -- and never swallowed.
-_execute_tool_duration = _reference_meter.create_histogram(
-    "gen_ai.execute_tool.duration",
-    unit="s",
-    description="The duration of a single tool execution.",
-)
 
 
 @contextlib.contextmanager
@@ -126,17 +114,10 @@ def _suppress_adk_native_telemetry():
         # ADK records gen_ai.client.token.usage and gen_ai.client.operation.duration for the model
         # call it hands to google-genai, but only as a fallback for when no model-client
         # instrumentation is loaded (see tracing._should_emit_native_telemetry). That call belongs
-        # to google-genai, so drop those two instruments.
+        # to google-genai, so drop those two instruments. Every other ADK instrument is left alone,
+        # including the invoke_agent inference/tool call counts, which describe ADK's own work.
         patch_attribute(adk_metrics, "_client_operation_duration", disabled_instrument)
         patch_attribute(adk_metrics, "_client_token_usage", disabled_instrument)
-        # ADK also records gen_ai.execute_tool.duration for every tool call, always dimensioned by
-        # the calling agent and by the tool's Python class name. This scenario emits that metric
-        # itself next to each execute_tool span, so leaving ADK's instrument on would double-count
-        # every tool execution and, for AgentTool, disagree with the reference point on both
-        # gen_ai.agent.name and gen_ai.tool.type. Drop it and record one point per operation below.
-        patch_attribute(adk_metrics, "_tool_execution_duration", disabled_instrument)
-        # Every other ADK instrument is left alone, including the invoke_agent inference/tool call
-        # counts and invoke_agent duration, which describe ADK's own work.
         yield
     finally:
         for owner, name, value in reversed(previous_attributes):
@@ -179,37 +160,17 @@ def run_agent_reference():
             "gen_ai.tool.name": "get_weather",
             "gen_ai.tool.type": "function",
         }
-        start = time.perf_counter()
-        error_type = None
-        try:
-            with _reference_tracer.start_as_current_span(
-                "execute_tool get_weather", attributes=tool_span_attributes
-            ) as tool_span:
-                tool_span.set_attribute("gen_ai.tool.description", "Get the current weather.")
-                tool_span.set_attribute("gen_ai.agent.name", tool_context.agent_name)
-                if tool_context.function_call_id:
-                    tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
-                tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps({"location": location}))
-                result = f"Sunny in {location}"
-                tool_span.set_attribute("gen_ai.tool.call.result", result)
-            return result
-        except Exception as e:
-            # Low-cardinality error identifier for the duration metric, matching ADK's
-            # own `resolve_error_type` fallback to the exception's class name.
-            error_type = type(e).__qualname__
-            raise
-        finally:
-            # Record in `finally` so a failed tool call is still timed. This is an ordinary tool
-            # execution, so there is no interaction type and `gen_ai.agent.name` is the agent
-            # executing the tool -- the same value the span carries.
-            duration_attributes = {
-                "gen_ai.tool.name": "get_weather",
-                "gen_ai.tool.type": "function",
-                "gen_ai.agent.name": tool_context.agent_name,
-            }
-            if error_type is not None:
-                duration_attributes["error.type"] = error_type
-            _execute_tool_duration.record(time.perf_counter() - start, duration_attributes)
+        with _reference_tracer.start_as_current_span(
+            "execute_tool get_weather", attributes=tool_span_attributes
+        ) as tool_span:
+            tool_span.set_attribute("gen_ai.tool.description", "Get the current weather.")
+            tool_span.set_attribute("gen_ai.agent.name", tool_context.agent_name)
+            if tool_context.function_call_id:
+                tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
+            tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps({"location": location}))
+            result = f"Sunny in {location}"
+            tool_span.set_attribute("gen_ai.tool.call.result", result)
+        return result
 
     tool_defs = [
         {
@@ -437,13 +398,9 @@ def run_memory_reference():
 def run_multi_agent_delegation_reference():
     """Delegation: a caller agent invokes a sub-agent exposed via ``AgentTool``.
 
-    ``google.adk.tools.agent_tool.AgentTool`` is ADK's agent-as-tool API: the
-    caller invokes the wrapped agent as a tool and receives its output back, so
-    the     caller expects a result to return. The caller-owned ``execute_tool`` span
-    records ``return_to_caller``, keeps the root agent as the executing agent,
-    and identifies the wrapped agent as the target. The child ``invoke_agent``
-    span carries only the target's executing identity. The sub-agent's model call is
-    handed to google-genai, so no inference span is emitted here.
+    ``AgentTool`` runs the wrapped agent and returns its result to the caller.
+    The caller-owned ``execute_tool`` span records the transfer; the child
+    ``invoke_agent`` span records the target's execution.
     """
     from google.adk.agents import Agent
     from google.adk.models.google_llm import Gemini
@@ -493,49 +450,27 @@ def run_multi_agent_delegation_reference():
                 "gen_ai.tool.type": "function",
                 **transfer_attributes,
             }
-            start = time.perf_counter()
-            error_type = None
-            try:
-                with _reference_tracer.start_as_current_span(
-                    f"execute_tool {agent_tool.name}", attributes=tool_span_attributes
-                ) as tool_span:
-                    if tool_context.function_call_id:
-                        tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
-                    tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps(args))
-                    # Child invoke_agent span: the target's own execution, identified
-                    # only by its name and with no transfer attributes.
-                    sub_agent_span_attributes = {
-                        "gen_ai.operation.name": "invoke_agent",
-                        "gen_ai.request.model": request_model,
-                        "gen_ai.agent.name": specialist.name,
-                    }
-                    with _reference_tracer.start_as_current_span(
-                        f"invoke_agent {specialist.name}", attributes=sub_agent_span_attributes
-                    ) as sub_agent_span:
-                        result = await original_run_async(args=args, tool_context=tool_context)
-                        # Success-only response attributes: set after the call
-                        # returns so a failure never manufactures them.
-                        sub_agent_span.set_attribute(
-                            "gen_ai.output.messages",
-                            json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(result)}]}]),
-                        )
-                    tool_span.set_attribute("gen_ai.tool.call.result", str(result))
-                return result
-            except Exception as e:
-                # Low-cardinality error identifier for the duration metric, matching
-                # ADK's own `resolve_error_type` fallback to the exception's class name.
-                error_type = type(e).__qualname__
-                raise
-            finally:
-                # Record in `finally` so a failed transfer is still timed.
-                duration_attributes = {
-                    "gen_ai.agent.name": root_agent.name,
-                    "gen_ai.tool.name": agent_tool.name,
-                    "gen_ai.tool.type": "function",
+            with _reference_tracer.start_as_current_span(
+                f"execute_tool {agent_tool.name}", attributes=tool_span_attributes
+            ) as tool_span:
+                if tool_context.function_call_id:
+                    tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
+                tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps(args))
+                sub_agent_span_attributes = {
+                    "gen_ai.operation.name": "invoke_agent",
+                    "gen_ai.request.model": request_model,
+                    "gen_ai.agent.name": specialist.name,
                 }
-                if error_type is not None:
-                    duration_attributes["error.type"] = error_type
-                _execute_tool_duration.record(time.perf_counter() - start, duration_attributes)
+                with _reference_tracer.start_as_current_span(
+                    f"invoke_agent {specialist.name}", attributes=sub_agent_span_attributes
+                ) as sub_agent_span:
+                    result = await original_run_async(args=args, tool_context=tool_context)
+                    sub_agent_span.set_attribute(
+                        "gen_ai.output.messages",
+                        json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(result)}]}]),
+                    )
+                tool_span.set_attribute("gen_ai.tool.call.result", str(result))
+            return result
 
         root_agent = Agent(
             name="root_agent",

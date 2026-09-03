@@ -5,7 +5,7 @@ import json
 import os
 from typing import TypedDict
 
-from langchain.tools import tool
+from langchain_core.tools import tool
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
 from reference_shared import flush_and_shutdown, reference_tracer, setup_otel
 
@@ -100,22 +100,13 @@ async def agent_node(state: GraphState) -> GraphState:
 
         final_message = result["messages"][-1]
         usage = getattr(final_message, "usage_metadata", None) or {}
-        finish_reason = (getattr(final_message, "response_metadata", None) or {}).get("finish_reason", "stop")
         if usage.get("input_tokens"):
             agent_span.set_attribute("gen_ai.usage.input_tokens", usage["input_tokens"])
         if usage.get("output_tokens"):
             agent_span.set_attribute("gen_ai.usage.output_tokens", usage["output_tokens"])
         agent_span.set_attribute(
             "gen_ai.output.messages",
-            json.dumps(
-                [
-                    {
-                        "role": "assistant",
-                        "parts": [{"type": "text", "content": final_message.text()}],
-                        "finish_reason": finish_reason,
-                    }
-                ]
-            ),
+            json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": final_message.text()}]}]),
         )
         return {"messages": state["messages"] + [final_message.text()]}
 
@@ -252,146 +243,6 @@ def run_execute_tool_reference():
         tool_message = get_weather.invoke(tool_call)
         tool_span.set_attribute("gen_ai.tool.call.result", tool_message.content)
     print(f"    -> {tool_message.content[:60]}")
-
-
-async def run_subagent_tool_delegation_reference():
-    """Delegate to a sub-agent through LangChain's documented tool wrapper pattern.
-
-    LangChain represents the association between this ordinary application-defined
-    tool and the specialist in application code rather than a dedicated SDK type.
-    Generic LangChain instrumentation can observe the tool execution and nested
-    agent invocation, but cannot identify a transfer or its target from
-    library-owned metadata. The execute_tool span therefore omits
-    gen_ai.transfer.*.
-    """
-    from langchain.agents import create_agent
-    from langchain.tools import ToolRuntime
-    from langchain_openai import ChatOpenAI
-
-    print("  [delegation] LangChain sub-agent as tool (reference implementation)")
-
-    request_model = "gpt-4o-mini"
-    supervisor_name = "weather-supervisor"
-    specialist_name = "weather-specialist"
-    specialist = create_agent(
-        model=ChatOpenAI(
-            model=request_model,
-            base_url=MOCK_BASE_URL,
-            api_key="mock-key",
-        ),
-        tools=[],
-        system_prompt="Answer weather questions concisely.",
-        name=specialist_name,
-    )
-
-    @tool(
-        specialist_name,
-        description="Delegate a weather question to the weather specialist.",
-    )
-    async def call_weather_specialist(
-        query: str,
-        runtime: ToolRuntime,
-    ) -> str:
-        tool_span_attributes = {
-            "gen_ai.operation.name": "execute_tool",
-            "gen_ai.tool.name": specialist_name,
-            "gen_ai.tool.type": "function",
-        }
-        with _reference_tracer.start_as_current_span(
-            f"execute_tool {specialist_name}",
-            attributes=tool_span_attributes,
-        ) as tool_span:
-            tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps({"query": query}))
-            tool_span.set_attribute("gen_ai.tool.call.id", runtime.tool_call_id)
-
-            target_span_attributes = {
-                "gen_ai.operation.name": "invoke_agent",
-                "gen_ai.request.model": request_model,
-                "gen_ai.agent.name": specialist_name,
-            }
-            with _reference_tracer.start_as_current_span(
-                f"invoke_agent {specialist_name}",
-                attributes=target_span_attributes,
-            ) as target_span:
-                target_span.set_attribute(
-                    "gen_ai.input.messages",
-                    json.dumps(
-                        [
-                            {
-                                "role": "user",
-                                "parts": [{"type": "text", "content": query}],
-                            }
-                        ]
-                    ),
-                )
-                result = await specialist.ainvoke({"messages": [{"role": "user", "content": query}]})
-                output_message = result["messages"][-1]
-                output = output_message.text()
-                finish_reason = (getattr(output_message, "response_metadata", None) or {}).get("finish_reason", "stop")
-                target_span.set_attribute(
-                    "gen_ai.output.messages",
-                    json.dumps(
-                        [
-                            {
-                                "role": "assistant",
-                                "parts": [{"type": "text", "content": output}],
-                                "finish_reason": finish_reason,
-                            }
-                        ]
-                    ),
-                )
-
-            tool_span.set_attribute("gen_ai.tool.call.result", output)
-            return output
-
-    supervisor = create_agent(
-        model=ChatOpenAI(
-            model=request_model,
-            base_url=MOCK_BASE_URL,
-            api_key="mock-key",
-        ),
-        tools=[call_weather_specialist],
-        system_prompt=("Delegate weather questions to the weather-specialist tool, then return its answer."),
-        name=supervisor_name,
-    )
-    input_text = "What's the weather in Seattle?"
-    supervisor_span_attributes = {
-        "gen_ai.operation.name": "invoke_agent",
-        "gen_ai.request.model": request_model,
-        "gen_ai.agent.name": supervisor_name,
-    }
-    with _reference_tracer.start_as_current_span(
-        f"invoke_agent {supervisor_name}",
-        attributes=supervisor_span_attributes,
-    ) as supervisor_span:
-        supervisor_span.set_attribute(
-            "gen_ai.input.messages",
-            json.dumps(
-                [
-                    {
-                        "role": "user",
-                        "parts": [{"type": "text", "content": input_text}],
-                    }
-                ]
-            ),
-        )
-        result = await supervisor.ainvoke({"messages": [{"role": "user", "content": input_text}]})
-        output_message = result["messages"][-1]
-        output = output_message.text()
-        finish_reason = (getattr(output_message, "response_metadata", None) or {}).get("finish_reason", "stop")
-        supervisor_span.set_attribute(
-            "gen_ai.output.messages",
-            json.dumps(
-                [
-                    {
-                        "role": "assistant",
-                        "parts": [{"type": "text", "content": output}],
-                        "finish_reason": finish_reason,
-                    }
-                ]
-            ),
-        )
-    print(f"    -> {output[:60]}")
 
 
 async def run_tool_handoff_reference():
@@ -636,7 +487,6 @@ async def run_workflow_reference():
                 {
                     "role": "assistant",
                     "parts": [{"type": "text", "content": str(final_output)}],
-                    "finish_reason": "stop",
                 }
             ]
         )
@@ -653,7 +503,6 @@ def main():
     run_retrieval_reference()
     run_plan_and_execute_reference()
     run_execute_tool_reference()
-    asyncio.run(run_subagent_tool_delegation_reference())
     asyncio.run(run_tool_handoff_reference())
     asyncio.run(run_workflow_reference())
     transfer_recorder.assert_complete()
