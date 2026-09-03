@@ -997,11 +997,6 @@ available.
 When this metric is reported alongside a `gen_ai.invoke_agent.internal`
 span, the metric value SHOULD be the same as the span duration.
 
-This metric measures the agent's own execution. A caller-owned
-`invoke_agent` operation that only directs work to another agent — the
-delegation or handoff operation carrying `gen_ai.agent.interaction.type` —
-MUST NOT record it, so one agent invocation yields one data point.
-
 **Requirement level:** [Recommended](https://github.com/open-telemetry/semantic-conventions/blob/v1.44.0/docs/general/signal-requirement-level.md).
 
 **Attributes:**
@@ -1057,11 +1052,6 @@ exactly once across the call tree.
 This metric SHOULD be emitted together with the
 `gen_ai.invoke_agent.internal` span for the same invocation.
 
-This metric counts the agent's own execution. A caller-owned
-`invoke_agent` operation that only directs work to another agent — the
-delegation or handoff operation carrying `gen_ai.agent.interaction.type` —
-MUST NOT record it, so one agent invocation yields one data point.
-
 **Requirement level:** [Recommended](https://github.com/open-telemetry/semantic-conventions/blob/v1.44.0/docs/general/signal-requirement-level.md).
 
 **Attributes:**
@@ -1105,11 +1095,6 @@ counted here.
 
 This metric SHOULD be emitted together with the
 `gen_ai.invoke_agent.internal` span for the same invocation.
-
-This metric counts the agent's own execution. A caller-owned
-`invoke_agent` operation that only directs work to another agent — the
-delegation or handoff operation carrying `gen_ai.agent.interaction.type` —
-MUST NOT record it, so one agent invocation yields one data point.
 
 **Requirement level:** [Recommended](https://github.com/open-telemetry/semantic-conventions/blob/v1.44.0/docs/general/signal-requirement-level.md).
 
@@ -1172,9 +1157,9 @@ Instrumentations SHOULD document the list of errors they report.
 
 **[3] `gen_ai.agent.interaction.type`:** This attribute applies to the caller-owned operation that directs work to another
 agent: an `execute_tool` operation whose tool exists to invoke or hand off to that
-agent, or an `invoke_agent` operation that the framework or protocol explicitly
-classifies as a delegation or handoff. It MUST NOT be inferred from span hierarchy
-or recorded on the target agent's own execution span.
+agent, or an `invoke_agent` client operation over a remote service that the framework
+or protocol explicitly classifies as a delegation or handoff. It MUST NOT be inferred
+from span hierarchy or recorded on the target agent's own execution span.
 
 When this attribute is present, `gen_ai.agent.name` on the same span or metric MUST
 identify the target agent receiving the delegation or handoff, not the agent that

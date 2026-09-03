@@ -46,7 +46,6 @@ class InteractionSpanRecorder(SpanProcessor):
 
     def assert_complete(self):
         assert self.interactions == {
-            ("execute_tool", "delegation", "weather-specialist"),
             ("execute_tool", "handoff", "weather-agent"),
         }
 
@@ -257,10 +256,12 @@ def run_execute_tool_reference():
 async def run_subagent_tool_delegation_reference():
     """Delegate to a sub-agent through LangChain's documented tool wrapper pattern.
 
-    The pattern is explicitly documented as sub-agent delegation, but unlike
-    Google ADK AgentTool, LangChain represents the association in application
-    code rather than a dedicated SDK type. The scenario therefore demonstrates
-    the mapping while documenting weaker generic capturability.
+    LangChain represents the association between this ordinary application-defined
+    tool and the specialist in application code rather than a dedicated SDK type.
+    Generic LangChain instrumentation can observe the tool execution and nested
+    agent invocation, but cannot classify the tool as delegation or identify its
+    target from library-owned metadata. The execute_tool span therefore omits
+    gen_ai.agent.interaction.type and target gen_ai.agent.name.
     """
     from langchain.agents import create_agent
     from langchain.tools import ToolRuntime
@@ -299,8 +300,6 @@ async def run_subagent_tool_delegation_reference():
             f"execute_tool {specialist_name}",
             attributes=tool_span_attributes,
         ) as tool_span:
-            tool_span.set_attribute("gen_ai.agent.interaction.type", "delegation")
-            tool_span.set_attribute("gen_ai.agent.name", specialist_name)
             tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps({"query": query}))
             tool_span.set_attribute("gen_ai.tool.call.id", runtime.tool_call_id)
 

@@ -1087,9 +1087,15 @@ MUST identify the target agent receiving the delegation or handoff. On ordinary
 `gen_ai.agent.name` retains its default meaning: the agent executing the tool.
 The target agent's own execution MUST NOT carry `gen_ai.agent.interaction.type`.
 
-When the framework models the transfer as its own dedicated operation rather than as
-a tool execution, it is recorded as a `gen_ai.invoke_agent` operation instead; neither
-this span nor `gen_ai.execute_tool.duration` is recorded for it.
+When the framework or protocol performs the transfer through a remote agent
+invocation rather than a tool execution, it is recorded as a
+`gen_ai.invoke_agent` client operation instead; neither this span nor
+`gen_ai.execute_tool.duration` is recorded for it.
+
+These conventions do not define a caller-owned span for a dedicated in-process
+non-tool transfer. When the source and target agent executions are observable,
+each is recorded as a `gen_ai.invoke_agent` internal span without
+`gen_ai.agent.interaction.type`.
 
 **Span name** SHOULD be `execute_tool {gen_ai.tool.name}`.
 
@@ -1124,9 +1130,9 @@ Instrumentations SHOULD document the list of errors they report.
 
 **[4] `gen_ai.agent.interaction.type`:** This attribute applies to the caller-owned operation that directs work to another
 agent: an `execute_tool` operation whose tool exists to invoke or hand off to that
-agent, or an `invoke_agent` operation that the framework or protocol explicitly
-classifies as a delegation or handoff. It MUST NOT be inferred from span hierarchy
-or recorded on the target agent's own execution span.
+agent, or an `invoke_agent` client operation over a remote service that the framework
+or protocol explicitly classifies as a delegation or handoff. It MUST NOT be inferred
+from span hierarchy or recorded on the target agent's own execution span.
 
 When this attribute is present, `gen_ai.agent.name` on the same span or metric MUST
 identify the target agent receiving the delegation or handoff, not the agent that

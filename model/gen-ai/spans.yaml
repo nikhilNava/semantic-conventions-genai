@@ -483,13 +483,13 @@ spans:
     note: |
       The `gen_ai.operation.name` SHOULD be `invoke_agent`.
 
-      When this span represents a caller-owned delegation or handoff — an invocation the
-      framework or protocol explicitly classifies as directing work to another agent —
-      the `gen_ai.agent.*` attributes identify that **target agent**, and
-      `gen_ai.agent.interaction.type` records the classification on this caller operation.
-      Otherwise this span represents the execution of the agent it names and does not carry
-      `gen_ai.agent.interaction.type`. When the target agent's execution is represented by
-      another `invoke_agent` span, that span MUST NOT carry `gen_ai.agent.interaction.type`.
+      This is a caller-owned operation. The `gen_ai.agent.*` attributes identify the
+      target agent invoked over the remote service. When the framework or protocol
+      explicitly classifies the invocation as a delegation or handoff,
+      `gen_ai.agent.interaction.type` records that classification.
+
+      When the target agent's execution is separately instrumented, its execution span
+      MUST NOT carry `gen_ai.agent.interaction.type`.
 
       Examples: OpenAI Assistants API, AWS Bedrock Agents.
     stability: development
@@ -537,26 +537,10 @@ spans:
     note: |
       The `gen_ai.operation.name` SHOULD be `invoke_agent`.
 
-      When this span represents a caller-owned delegation or handoff — an invocation the
-      framework or protocol explicitly classifies as directing work to another agent —
-      the `gen_ai.agent.*` attributes identify that **target agent**, and
-      `gen_ai.agent.interaction.type` records the classification on this caller operation.
-      Otherwise this span represents the execution of the agent it names and does not carry
-      `gen_ai.agent.interaction.type`. When the target agent's execution is represented by
-      another `invoke_agent` span, that span MUST NOT carry `gen_ai.agent.interaction.type`.
-
-      A framework operation dedicated to transferring work to another agent SHOULD be
-      recorded as this operation, naming the target agent, and SHOULD NOT be recorded as a
-      `gen_ai.execute_tool` operation, even when the model selects the transfer like a tool.
-      For example, the OpenAI Agents SDK records a native handoff with its own handoff span
-      naming the source and target agents, distinct from the spans it records for function
-      tools.
-
-      The agent-execution metrics — `gen_ai.invoke_agent.duration`,
-      `gen_ai.invoke_agent.inference_calls` and `gen_ai.invoke_agent.tool_calls` — follow the
-      execution span, not the caller-owned operation: a span carrying
-      `gen_ai.agent.interaction.type` MUST NOT record them, so one agent invocation yields one
-      data point per metric.
+      This span represents the execution of the agent identified by the
+      `gen_ai.agent.*` attributes. It MUST NOT carry
+      `gen_ai.agent.interaction.type`; that attribute belongs to a caller-owned
+      `execute_tool` or `invoke_agent` client operation.
 
       Examples: LangChain agents, CrewAI agents.
     stability: development
@@ -568,9 +552,6 @@ spans:
         sampling_relevant: true
       - ref: gen_ai.agent.name
         sampling_relevant: true
-      - ref: gen_ai.agent.interaction.type
-        requirement_level:
-          conditionally_required: When the instrumented framework or protocol explicitly distinguishes this caller-owned invocation as a delegation or handoff to another agent.
 
   - type: gen_ai.execute_tool.internal
     requirement_level: recommended
@@ -600,9 +581,15 @@ spans:
       `gen_ai.agent.name` retains its default meaning: the agent executing the tool.
       The target agent's own execution MUST NOT carry `gen_ai.agent.interaction.type`.
 
-      When the framework models the transfer as its own dedicated operation rather than as
-      a tool execution, it is recorded as a `gen_ai.invoke_agent` operation instead; neither
-      this span nor `gen_ai.execute_tool.duration` is recorded for it.
+      When the framework or protocol performs the transfer through a remote agent
+      invocation rather than a tool execution, it is recorded as a
+      `gen_ai.invoke_agent` client operation instead; neither this span nor
+      `gen_ai.execute_tool.duration` is recorded for it.
+
+      These conventions do not define a caller-owned span for a dedicated in-process
+      non-tool transfer. When the source and target agent executions are observable,
+      each is recorded as a `gen_ai.invoke_agent` internal span without
+      `gen_ai.agent.interaction.type`.
     stability: development
     attributes:
       - ref_group: attributes.gen_ai.error

@@ -10,6 +10,9 @@ Runnable directly (``python tests/test_metrics.py``) or under pytest.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from semconv_genai.data_files import _normalize_scenario_data_entry, load_scenario_data_files
 from semconv_genai.semconv_model import metric_specs, span_specs
 
@@ -75,7 +78,16 @@ def test_committed_langchain_agent_interaction_coverage():
     langchain = entries["langchain"]
 
     assert langchain.spans["execute_tool"]["gen_ai.agent.interaction.type"] == "present"
-    assert langchain.spans["invoke_agent_internal"]["gen_ai.agent.interaction.type"] == "absent"
+    assert "gen_ai.agent.interaction.type" not in langchain.spans["invoke_agent_internal"]
+
+
+def test_committed_openai_agents_internal_spans_have_no_interaction_type():
+    data = json.loads(
+        (Path(__file__).parents[1] / "scenarios" / "openai-agents" / "data.json").read_text(encoding="utf-8")
+    )
+    attributes = data["spans"]["gen_ai.invoke_agent.internal"]
+
+    assert "gen_ai.agent.interaction.type" not in attributes
 
 
 if __name__ == "__main__":
@@ -87,4 +99,5 @@ if __name__ == "__main__":
     test_span_types_absent_from_a_data_file_are_not_reported()
     test_span_specs_are_named_as_the_registry_names_them()
     test_committed_langchain_agent_interaction_coverage()
+    test_committed_openai_agents_internal_spans_have_no_interaction_type()
     print("ok")
