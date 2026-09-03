@@ -1143,6 +1143,8 @@ Some tool calls transfer work or control to another target.
 for a result and resumes or passes control to the target.
 `gen_ai.transfer.target.*` identifies that target. `gen_ai.agent.*` continues
 to identify the agent executing the tool.
+Transfer mode and target attributes are independent; record each attribute
+when the corresponding value is available.
 
 When the framework or protocol performs the transfer through a remote agent
 invocation rather than a tool execution, it is recorded as a
@@ -1190,11 +1192,11 @@ Instrumentations SHOULD document the list of errors they report.
 **[4] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer any `gen_ai.transfer.*` attribute from span
 hierarchy, tool names, timing, or application-specific conventions.
 
-**[5] `gen_ai.transfer.target.id`:** When `gen_ai.transfer.mode` is present and the target identifier is available.
+**[5] `gen_ai.transfer.target.id`:** When the target identifier is available.
 
-**[6] `gen_ai.transfer.target.name`:** When `gen_ai.transfer.mode` is present and the target name is available.
+**[6] `gen_ai.transfer.target.name`:** When the target name is available.
 
-**[7] `gen_ai.transfer.target.type`:** When `gen_ai.transfer.mode` is present and the target type is known.
+**[7] `gen_ai.transfer.target.type`:** When the target type is known.
 
 **[8] `gen_ai.tool.description`:**
 

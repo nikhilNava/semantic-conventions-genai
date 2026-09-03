@@ -602,6 +602,8 @@ spans:
       for a result and resumes or passes control to the target.
       `gen_ai.transfer.target.*` identifies that target. `gen_ai.agent.*` continues
       to identify the agent executing the tool.
+      Transfer mode and target attributes are independent; record each attribute
+      when the corresponding value is available.
 
       When the framework or protocol performs the transfer through a remote agent
       invocation rather than a tool execution, it is recorded as a
@@ -637,13 +639,13 @@ spans:
           conditionally_required: When the instrumented framework or protocol explicitly exposes the tool call as a transfer.
       - ref: gen_ai.transfer.target.type
         requirement_level:
-          conditionally_required: When `gen_ai.transfer.mode` is present and the target type is known.
+          conditionally_required: When the target type is known.
       - ref: gen_ai.transfer.target.name
         requirement_level:
-          conditionally_required: When `gen_ai.transfer.mode` is present and the target name is available.
+          conditionally_required: When the target name is available.
       - ref: gen_ai.transfer.target.id
         requirement_level:
-          conditionally_required: When `gen_ai.transfer.mode` is present and the target identifier is available.
+          conditionally_required: When the target identifier is available.
 
   - type: gen_ai.invoke_workflow.internal
     requirement_level: recommended
