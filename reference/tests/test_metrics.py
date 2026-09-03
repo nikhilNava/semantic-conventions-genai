@@ -104,7 +104,6 @@ def test_committed_langchain_transfer_coverage():
 
     for attribute in _TRANSFER_ATTRIBUTES:
         assert execute_tool[attribute] == "present", attribute
-    assert execute_tool["gen_ai.transfer.target.id"] == "absent"
     assert execute_tool["gen_ai.transfer.target.type"] == "absent"
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in langchain.spans["invoke_agent_internal"])
 

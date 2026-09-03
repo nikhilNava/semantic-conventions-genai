@@ -491,11 +491,6 @@ attributes:
     brief: The human-readable name of the transfer target.
     examples: ["weather_agent", "human_support"]
     stability: development
-  - key: gen_ai.transfer.target.id
-    type: string
-    brief: The unique and stable identifier of the transfer target.
-    examples: ["agent-42", "support-tier-2"]
-    stability: development
   - key: gen_ai.transfer.target.type
     type:
       members:

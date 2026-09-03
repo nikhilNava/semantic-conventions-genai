@@ -427,8 +427,6 @@ async def run_tool_handoff_reference():
             attributes=tool_span_attributes,
         ) as tool_span:
             tool_span.set_attribute("gen_ai.agent.name", source_name)
-            tool_span.set_attribute("gen_ai.transfer.mode", "pass_control")
-            tool_span.set_attribute("gen_ai.transfer.target.name", target_name)
             tool_span.set_attribute("gen_ai.tool.call.id", runtime.tool_call_id)
             last_ai_message = next(
                 message for message in reversed(runtime.state["messages"]) if isinstance(message, AIMessage)
@@ -446,7 +444,16 @@ async def run_tool_handoff_reference():
                 },
                 graph=Command.PARENT,
             )
-            tool_span.set_attribute("gen_ai.tool.call.result", f"goto={target_name}")
+            if not isinstance(command, Command):
+                raise TypeError("Expected LangGraph tool to return a Command")
+            if command.graph != Command.PARENT:
+                raise ValueError("Expected LangGraph command to target the parent graph")
+            if not isinstance(command.goto, str):
+                raise TypeError("Expected LangGraph command to contain one named target")
+
+            tool_span.set_attribute("gen_ai.transfer.mode", "pass_control")
+            tool_span.set_attribute("gen_ai.transfer.target.name", command.goto)
+            tool_span.set_attribute("gen_ai.tool.call.result", f"goto={command.goto}")
             return command
 
     model = ChatOpenAI(

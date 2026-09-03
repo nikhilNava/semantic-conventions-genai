@@ -15,7 +15,6 @@
 | --- | --- |
 | gen_ai.agent.name | [google-adk], [langchain], [openai-agents], [pydantic-ai] |
 | gen_ai.transfer.mode | [google-adk], [langchain], [openai-agents] |
-| gen_ai.transfer.target.id | (none) |
 | gen_ai.transfer.target.name | [google-adk], [langchain], [openai-agents] |
 | gen_ai.transfer.target.type | [google-adk], [openai-agents] |
 
