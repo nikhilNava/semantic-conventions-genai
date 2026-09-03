@@ -242,8 +242,6 @@ metrics:
 
       When this metric is reported alongside a `gen_ai.execute_tool` span,
       the metric value SHOULD be the same as the span duration.
-
-      `gen_ai.agent.name` identifies the agent executing the tool.
     instrument: histogram
     unit: "s"
     stability: development

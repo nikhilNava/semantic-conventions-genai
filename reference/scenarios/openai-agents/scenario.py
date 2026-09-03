@@ -24,8 +24,8 @@ _reference_tracer = reference_tracer()
 _reference_meter = reference_meter()
 
 # `gen_ai.execute_tool.duration` is recorded once per tool execution this scenario
-# instruments, next to that execution's `execute_tool` span. `gen_ai.agent.name`
-# identifies the agent executing the tool. Transfer attributes remain span-only.
+# instruments, next to that execution's `execute_tool` span. Transfer attributes
+# remain span-only.
 # A native handoff is not a tool execution, so it records no point here. Every site records `error.type`
 # (conditionally required per model/gen-ai/metrics.yaml) when the execution it
 # times raises, derived from the exception's class name and never swallowed.

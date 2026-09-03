@@ -163,7 +163,7 @@ attribute_groups:
         requirement_level:
           recommended: If available.
       - ref: gen_ai.agent.name
-        brief: The name of the agent executing the tool.
+        brief: The human-readable name of the agent executing the tool.
         requirement_level:
           conditionally_required: When applicable.
 
