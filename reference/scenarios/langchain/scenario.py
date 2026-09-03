@@ -18,23 +18,25 @@ AGENT_SYSTEM_PROMPT = "You are a helpful weather assistant."
 _reference_tracer = reference_tracer()
 
 
-class InteractionSpanRecorder(SpanProcessor):
+class TransferSpanRecorder(SpanProcessor):
     def __init__(self):
-        self.interactions: set[tuple[str, str, str]] = set()
+        self.transfers: set[tuple[str, str, str, str, str]] = set()
 
     def on_start(self, span, parent_context=None):
         pass
 
     def on_end(self, span: ReadableSpan):
         attributes = span.attributes or {}
-        interaction_type = attributes.get("gen_ai.agent.interaction.type")
-        if interaction_type is None:
+        transfer_mode = attributes.get("gen_ai.transfer.mode")
+        if transfer_mode is None:
             return
-        self.interactions.add(
+        self.transfers.add(
             (
                 str(attributes.get("gen_ai.operation.name")),
-                str(interaction_type),
                 str(attributes.get("gen_ai.agent.name")),
+                str(transfer_mode),
+                str(attributes.get("gen_ai.transfer.target.name")),
+                str(attributes.get("gen_ai.transfer.target.type")),
             )
         )
 
@@ -45,8 +47,8 @@ class InteractionSpanRecorder(SpanProcessor):
         return True
 
     def assert_complete(self):
-        assert self.interactions == {
-            ("execute_tool", "handoff", "weather-agent"),
+        assert self.transfers == {
+            ("execute_tool", "triage-agent", "pass_control", "weather-agent", "agent"),
         }
 
 
@@ -259,9 +261,9 @@ async def run_subagent_tool_delegation_reference():
     LangChain represents the association between this ordinary application-defined
     tool and the specialist in application code rather than a dedicated SDK type.
     Generic LangChain instrumentation can observe the tool execution and nested
-    agent invocation, but cannot classify the tool as delegation or identify its
-    target from library-owned metadata. The execute_tool span therefore omits
-    gen_ai.agent.interaction.type and target gen_ai.agent.name.
+    agent invocation, but cannot identify a transfer or its target from
+    library-owned metadata. The execute_tool span therefore omits
+    gen_ai.transfer.*.
     """
     from langchain.agents import create_agent
     from langchain.tools import ToolRuntime
@@ -425,8 +427,10 @@ async def run_tool_handoff_reference():
             "execute_tool transfer_to_weather_agent",
             attributes=tool_span_attributes,
         ) as tool_span:
-            tool_span.set_attribute("gen_ai.agent.interaction.type", "handoff")
-            tool_span.set_attribute("gen_ai.agent.name", target_name)
+            tool_span.set_attribute("gen_ai.agent.name", source_name)
+            tool_span.set_attribute("gen_ai.transfer.mode", "pass_control")
+            tool_span.set_attribute("gen_ai.transfer.target.name", target_name)
+            tool_span.set_attribute("gen_ai.transfer.target.type", "agent")
             tool_span.set_attribute("gen_ai.tool.call.id", runtime.tool_call_id)
             last_ai_message = next(
                 message for message in reversed(runtime.state["messages"]) if isinstance(message, AIMessage)
@@ -639,15 +643,15 @@ def main():
     print("=== Reference Implementation: LangChain Reference ===")
 
     tp, lp, mp = setup_otel()
-    interaction_recorder = InteractionSpanRecorder()
-    tp.add_span_processor(interaction_recorder)
+    transfer_recorder = TransferSpanRecorder()
+    tp.add_span_processor(transfer_recorder)
     run_retrieval_reference()
     run_plan_and_execute_reference()
     run_execute_tool_reference()
     asyncio.run(run_subagent_tool_delegation_reference())
     asyncio.run(run_tool_handoff_reference())
     asyncio.run(run_workflow_reference())
-    interaction_recorder.assert_complete()
+    transfer_recorder.assert_complete()
 
     flush_and_shutdown(tp, lp, mp)
 

@@ -24,11 +24,10 @@ _reference_tracer = reference_tracer()
 _reference_meter = reference_meter()
 
 # `gen_ai.execute_tool.duration` is recorded once per tool execution this scenario
-# instruments, next to that execution's `execute_tool` span. It carries
-# `gen_ai.agent.interaction.type` when the tool call is itself a delegation to
-# another agent, and `gen_ai.agent.name` then identifies the target agent; for an
-# ordinary tool call there is no interaction type and `gen_ai.agent.name` is the
-# agent executing the tool (see model/gen-ai/metrics.yaml). A native handoff is
+# instruments, next to that execution's `execute_tool` span. `gen_ai.agent.name`
+# identifies the agent executing the tool. Agent-as-tool calls also carry
+# `gen_ai.transfer.*` attributes describing the return-to-caller transfer and
+# target (see model/gen-ai/metrics.yaml). A native handoff is
 # not a tool execution, so it records no point here. Every site records `error.type`
 # (conditionally required per model/gen-ai/metrics.yaml) when the execution it
 # times raises, derived from the exception's class name and never swallowed.
@@ -67,7 +66,7 @@ def _invoke_agent_execution_spans(*, request_model, input_text):
 
     ``input_text`` is the user's message, which is the input to the first (source)
     execution only. Each executing agent's own response goes on its own span, and no
-    execution span carries ``gen_ai.agent.interaction.type``.
+    execution span carries ``gen_ai.transfer.*``.
 
     Each execution's ``gen_ai.invoke_agent.duration`` point is recorded here, where the
     execution ends, so the two executions of one handoff run produce one point each.
@@ -314,9 +313,8 @@ async def run_agent_as_tool_delegation():
 
     `Agent.as_tool()` is the SDK's explicit agent-as-tool API: the caller invokes
     the target agent as a function tool and, per its docstring, "the conversation
-    is continued by the original agent" -- the caller expects a result back. That
-    is a `delegation` interaction, mapped directly from the API being invoked (not
-    inferred from the arguments).
+    is continued by the original agent" -- the caller expects a result back.
+    This maps directly to `return_to_caller`, without inference from arguments.
 
     Two agents really execute here, and each logical execution gets exactly one
     span:
@@ -328,9 +326,9 @@ async def run_agent_as_tool_delegation():
       what actually runs the target agent (`Agent.as_tool` invokes it through its
       own nested `Runner.run`). It is nested under the caller-owned
       `execute_tool weather-specialist` span and carries the target's response.
-      Being the target's own execution, it stays free of
-      `gen_ai.agent.interaction.type` -- that is caller-owned and lives on the
-      `execute_tool` span, which names the target. Its `gen_ai.input.messages` is
+      Being the target's own execution, it stays free of `gen_ai.transfer.*`.
+      Those attributes live on the caller-owned `execute_tool` span. Its
+      `gen_ai.input.messages` is
       an honest omission: the invoker seam exposes the delegated input only as the
       tool's raw argument JSON, which the caller-owned `execute_tool` span already
       records verbatim as `gen_ai.tool.call.arguments`; the target's message list
@@ -371,15 +369,17 @@ async def run_agent_as_tool_delegation():
             with _reference_tracer.start_as_current_span(
                 f"execute_tool {weather_tool.name}", attributes=tool_span_attributes
             ) as tool_span:
-                # `direct`: `as_tool()` is an agent-as-tool delegation API, so the type
-                # is intrinsic to the call, and the target is the wrapped agent's name.
-                tool_span.set_attribute("gen_ai.agent.interaction.type", "delegation")
-                tool_span.set_attribute("gen_ai.agent.name", specialist.name)
+                # `as_tool()` returns the nested agent's result to the caller.
+                # The source and target names come from the two SDK Agent objects.
+                tool_span.set_attribute("gen_ai.agent.name", caller.name)
+                tool_span.set_attribute("gen_ai.transfer.mode", "return_to_caller")
+                tool_span.set_attribute("gen_ai.transfer.target.name", specialist.name)
+                tool_span.set_attribute("gen_ai.transfer.target.type", "agent")
                 tool_span.set_attribute("gen_ai.tool.call.id", tool_context.tool_call_id)
                 tool_span.set_attribute("gen_ai.tool.call.arguments", input_json)
                 # This invoker call *is* the target agent's execution (`as_tool` runs it
                 # through its own nested `Runner.run`), so the target's single execution
-                # span wraps it. No interaction type: that is the caller's, above.
+                # span wraps it. Transfer attributes stay on the caller's tool span.
                 target_span_attributes = {
                     "gen_ai.operation.name": "invoke_agent",
                     "gen_ai.request.model": request_model,
@@ -403,13 +403,14 @@ async def run_agent_as_tool_delegation():
             error_type = type(e).__qualname__
             raise
         finally:
-            # Record in `finally` so a failed delegation is still timed. Every
-            # dimension is the operation's target identity, known before the call.
+            # Record in `finally` so a failed transfer is still timed.
             duration_attributes = {
                 "gen_ai.tool.name": weather_tool.name,
                 "gen_ai.tool.type": "function",
-                "gen_ai.agent.interaction.type": "delegation",
-                "gen_ai.agent.name": specialist.name,
+                "gen_ai.agent.name": caller.name,
+                "gen_ai.transfer.mode": "return_to_caller",
+                "gen_ai.transfer.target.name": specialist.name,
+                "gen_ai.transfer.target.type": "agent",
             }
             if error_type is not None:
                 duration_attributes["error.type"] = error_type
@@ -475,7 +476,7 @@ async def run_agent_handoff():
     seam, while the scenario's entry point stays the public `Runner.run`.
 
     The convention has no caller-owned INTERNAL span for this non-tool handoff, so
-    the scenario does not emit `gen_ai.agent.interaction.type`. This is an honest
+    the scenario does not emit `gen_ai.transfer.*`. This is an honest
     capture gap rather than remapping the SDK's dedicated handoff to `execute_tool`.
     """
     client = openai.AsyncOpenAI(base_url=MOCK_BASE_URL, api_key="mock-key")

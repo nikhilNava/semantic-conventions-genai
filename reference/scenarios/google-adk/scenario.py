@@ -32,9 +32,9 @@ _tool_calls = _reference_meter.create_histogram(
 )
 # `gen_ai.execute_tool.duration` is recorded once per tool execution this scenario
 # instruments, next to that execution's `execute_tool` span (ADK's own instrument for
-# the same metric is suppressed in `_suppress_adk_native_telemetry`). It carries
-# `gen_ai.agent.interaction.type` when the tool call is a delegation to another agent;
-# `gen_ai.agent.name` then identifies the target agent (see model/gen-ai/metrics.yaml).
+# the same metric is suppressed in `_suppress_adk_native_telemetry`).
+# `gen_ai.agent.name` identifies the agent executing the tool. AgentTool calls also
+# carry `gen_ai.transfer.*` attributes describing the target and transfer mode.
 # Every site records `error.type` (conditionally required per model/gen-ai/metrics.yaml)
 # when the execution it times raises, derived from the exception's class name -- matching
 # ADK's own `resolve_error_type` fallback -- and never swallowed.
@@ -440,11 +440,10 @@ def run_multi_agent_delegation_reference():
 
     ``google.adk.tools.agent_tool.AgentTool`` is ADK's agent-as-tool API: the
     caller invokes the wrapped agent as a tool and receives its output back, so
-    the caller expects a result to return -- a ``delegation`` interaction, mapped
-    directly from the API being invoked (not inferred from arguments or topology).
-    The caller-owned ``execute_tool`` span carries ``gen_ai.agent.interaction.type``
-    and names the target (the wrapped agent); the child ``invoke_agent`` span
-    carries only the target's executing identity. The sub-agent's model call is
+    the     caller expects a result to return. The caller-owned ``execute_tool`` span
+    records ``return_to_caller``, keeps the root agent as the executing agent,
+    and identifies the wrapped agent as the target. The child ``invoke_agent``
+    span carries only the target's executing identity. The sub-agent's model call is
     handed to google-genai, so no inference span is emitted here.
     """
     from google.adk.agents import Agent
@@ -488,15 +487,17 @@ def run_multi_agent_delegation_reference():
                 with _reference_tracer.start_as_current_span(
                     f"execute_tool {agent_tool.name}", attributes=tool_span_attributes
                 ) as tool_span:
-                    # `direct`: AgentTool is an agent-as-tool delegation API, so the
-                    # type is intrinsic to the call; the target is the wrapped agent.
-                    tool_span.set_attribute("gen_ai.agent.interaction.type", "delegation")
-                    tool_span.set_attribute("gen_ai.agent.name", specialist.name)
+                    # AgentTool returns the wrapped agent's result to the caller.
+                    # Both names come from the SDK Agent objects.
+                    tool_span.set_attribute("gen_ai.agent.name", root_agent.name)
+                    tool_span.set_attribute("gen_ai.transfer.mode", "return_to_caller")
+                    tool_span.set_attribute("gen_ai.transfer.target.name", specialist.name)
+                    tool_span.set_attribute("gen_ai.transfer.target.type", "agent")
                     if tool_context.function_call_id:
                         tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
                     tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps(args))
                     # Child invoke_agent span: the target's own execution, identified
-                    # only by its name and with no interaction type.
+                    # only by its name and with no transfer attributes.
                     sub_agent_span_attributes = {
                         "gen_ai.operation.name": "invoke_agent",
                         "gen_ai.request.model": request_model,
@@ -520,13 +521,14 @@ def run_multi_agent_delegation_reference():
                 error_type = type(e).__qualname__
                 raise
             finally:
-                # Record in `finally` so a failed delegation is still timed. Every
-                # dimension is the operation's target identity, known before the call.
+                # Record in `finally` so a failed transfer is still timed.
                 duration_attributes = {
                     "gen_ai.tool.name": agent_tool.name,
                     "gen_ai.tool.type": "function",
-                    "gen_ai.agent.interaction.type": "delegation",
-                    "gen_ai.agent.name": specialist.name,
+                    "gen_ai.agent.name": root_agent.name,
+                    "gen_ai.transfer.mode": "return_to_caller",
+                    "gen_ai.transfer.target.name": specialist.name,
+                    "gen_ai.transfer.target.type": "agent",
                 }
                 if error_type is not None:
                     duration_attributes["error.type"] = error_type
