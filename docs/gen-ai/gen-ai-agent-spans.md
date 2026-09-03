@@ -32,17 +32,14 @@ The semantic conventions for GenAI agents extend and override the semantic conve
 
 ### Agent-to-agent interactions
 
-Agent-to-agent interactions have two independently observable parts:
-
-1. A caller-owned operation in which a source directs work or passes control to a target.
-2. An `invoke_agent` INTERNAL span representing the target agent's execution, when that execution is observable.
-
-Use the operation exposed by the instrumented framework or protocol:
+When an agent directs work or passes control to another agent, use the span
+that corresponds to the operation exposed by the instrumented framework or
+protocol:
 
 | Framework or protocol operation | Caller-owned span |
 | --- | --- |
 | A tool call transfers work or control | [`execute_tool`](gen-ai-spans.md#execute-tool-span) |
-| A remote API or protocol transfers work or control to an agent | [`invoke_agent` CLIENT](#invoke-agent-client-span) |
+| An API or protocol invokes another agent | [`invoke_agent` CLIENT](#invoke-agent-client-span) |
 
 `gen_ai.transfer.mode` records whether the initiator waits for the target and
 resumes (`return_to_caller`) or the target takes control of the remaining work
@@ -53,48 +50,13 @@ transfer semantics and target. They MUST NOT be inferred from span hierarchy,
 tool names, timing, or application-specific conventions.
 
 On an `execute_tool` span, `gen_ai.agent.*` identifies the agent executing the
-tool. On an `invoke_agent` span, it identifies the invoked agent.
+tool. On an `invoke_agent` CLIENT span, it identifies the invoked agent.
+The target agent's execution MAY independently produce an `invoke_agent`
+INTERNAL span when it is observable; such a span is not required solely to
+represent the transfer.
 
-For a tool-based interaction in one process:
-
-```mermaid
-flowchart LR
-  subgraph P["PROCESS: multi-agent runtime"]
-    direction LR
-    subgraph S["SOURCE AGENT"]
-      S1["invoke_agent source<br/>agent execution"]
-      S2["execute_tool transfer<br/>agent.name = source<br/>transfer.mode = return_to_caller | pass_control<br/>transfer.target.type = agent<br/>transfer.target.name = target"]
-      S1 --> S2
-    end
-    subgraph T["TARGET AGENT"]
-      T1["invoke_agent target<br/>agent execution"]
-    end
-    S2 --> T1
-  end
-```
-
-For an invocation across a process or service boundary:
-
-```mermaid
-flowchart LR
-  subgraph C["CALLER PROCESS"]
-    C1["invoke_agent source<br/>agent execution"]
-    C2["invoke_agent target [CLIENT]<br/>agent.name = target<br/>transfer.mode = return_to_caller | pass_control<br/>transfer.target.type = agent<br/>transfer.target.name = target"]
-    C1 --> C2
-  end
-  subgraph T["TARGET PROCESS"]
-    T1["invoke_agent target [INTERNAL]<br/>agent execution"]
-  end
-  C2 --> T1
-```
-
-When trace context is propagated, the target execution can be a descendant of
-the caller-owned operation. These conventions do not require a particular
-context-propagation mechanism.
-
-A dedicated in-process non-tool transfer has no caller-owned span under these
-conventions. When the source and target agent executions are observable, record
-each as an `invoke_agent` INTERNAL span.
+See [agent-to-agent interaction examples](non-normative/examples-agent-interactions.md)
+for example trace topologies and attribute values.
 
 ### Create agent span
 
@@ -290,15 +252,15 @@ Semantic conventions for individual GenAI systems and frameworks MAY specify dif
 | [`gen_ai.agent.id`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` If applicable. | string | The stable unique identifier of the invoked GenAI agent. [4] | `asst_5j66UpCpwteGg4YSxUnt7lPY`; `arn:aws:bedrock:us-east-1:123:agent/42`; `urn:agent:projects-123:projects:123:locations:us-east1:aiplatform:reasoningEngines:456` |
 | [`gen_ai.agent.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` When available. | string | The human-readable name of the invoked GenAI agent. | `Math Tutor`; `Fiction Writer` |
 | [`gen_ai.agent.version`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` When available. | string | The version of the invoked GenAI agent. | `1.0.0`; `2025-05-01` |
-| [`gen_ai.conversation.id`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [10] | string | The unique identifier for a conversation (session, thread), used to store and correlate messages within this conversation. [11] | `conv_5j66UpCpwteGg4YSxUnt7lPY` |
-| [`gen_ai.data_source.id`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` If applicable. | string | The data source identifier. [12] | `H7STPQYOND` |
-| [`gen_ai.output.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [13] | string | Represents the content type requested by the client. [14] | `text`; `json`; `image` |
+| [`gen_ai.conversation.id`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [5] | string | The unique identifier for a conversation (session, thread), used to store and correlate messages within this conversation. [6] | `conv_5j66UpCpwteGg4YSxUnt7lPY` |
+| [`gen_ai.data_source.id`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` If applicable. | string | The data source identifier. [7] | `H7STPQYOND` |
+| [`gen_ai.output.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [8] | string | Represents the content type requested by the client. [9] | `text`; `json`; `image` |
 | [`gen_ai.request.choice.count`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` If available, in the request, and !=1. | int | The target number of candidate completions to return. | `3` |
 | [`gen_ai.request.seed`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` If applicable and if the request includes a seed. | int | Requests with same seed value more likely to return same result. | `100` |
-| [`gen_ai.transfer.mode`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [5] | string | Describes how control passes to the transfer target. [6] | `return_to_caller`; `pass_control` |
-| [`gen_ai.transfer.target.id`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [7] | string | The unique and stable identifier of the transfer target. | `agent-42`; `support-tier-2` |
-| [`gen_ai.transfer.target.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [8] | string | The human-readable name of the transfer target. | `weather_agent`; `human_support` |
-| [`gen_ai.transfer.target.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [9] | string | The type of the transfer target. | `agent`; `human`; `workflow` |
+| [`gen_ai.transfer.mode`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [10] | string | Describes how control passes to the transfer target. [11] | `return_to_caller`; `pass_control` |
+| [`gen_ai.transfer.target.id`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [12] | string | The unique and stable identifier of the transfer target. | `agent-42`; `support-tier-2` |
+| [`gen_ai.transfer.target.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [13] | string | The human-readable name of the transfer target. | `weather_agent`; `human_support` |
+| [`gen_ai.transfer.target.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [14] | string | The type of the transfer target. | `agent`; `human`; `workflow` |
 | [`server.port`](https://github.com/open-telemetry/semantic-conventions/blob/v1.44.0/docs/registry/attributes/server.md) | ![Stable](https://img.shields.io/badge/-stable-lightgreen) | `Conditionally Required` If `server.address` is set. | int | GenAI server port. [15] | `80`; `8080`; `443` |
 | [`gen_ai.request.frequency_penalty`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` | double | The frequency penalty setting for the GenAI request. | `0.1` |
 | [`gen_ai.request.max_tokens`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` | int | The maximum number of tokens the model generates for a request. | `100` |
@@ -355,20 +317,9 @@ Instrumentations SHOULD document the list of errors they report.
 **[4] `gen_ai.agent.id`:** For hosted agents, this SHOULD be the provider-assigned stable identifier of the agent resource such as [AWS Bedrock agent ARN](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent_Agent.html) or [GCP Agent Registry identifier](https://docs.cloud.google.com/agent-registry/concepts#agent-identifier).
 It's NOT RECOMMENDED to record in-memory agent instance ids on this attribute due to their transient nature.
 
-**[5] `gen_ai.transfer.mode`:** When the instrumented framework or protocol explicitly exposes this invocation as a transfer.
+**[5] `gen_ai.conversation.id`:** If and only if the instrumented library has one readily available, or the user application provides one through OpenTelemetry context or library-specific mechanisms.
 
-**[6] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer any `gen_ai.transfer.*` attribute from span
-hierarchy, tool names, timing, or application-specific conventions.
-
-**[7] `gen_ai.transfer.target.id`:** When `gen_ai.transfer.mode` is present and the target identifier is available.
-
-**[8] `gen_ai.transfer.target.name`:** When `gen_ai.transfer.mode` is present and the target name is available.
-
-**[9] `gen_ai.transfer.target.type`:** When `gen_ai.transfer.mode` is present and the target type is known.
-
-**[10] `gen_ai.conversation.id`:** If and only if the instrumented library has one readily available, or the user application provides one through OpenTelemetry context or library-specific mechanisms.
-
-**[11] `gen_ai.conversation.id`:** Instrumentations SHOULD populate conversation id when they have an identifier
+**[6] `gen_ai.conversation.id`:** Instrumentations SHOULD populate conversation id when they have an identifier
 for the conversation readily available for a given operation, for example:
 
 - when the client framework being instrumented manages conversation history
@@ -387,13 +338,24 @@ Application developers that manage conversation history MAY add conversation id 
 spans or logs using custom span or log record processors or hooks provided by instrumentation
 libraries.
 
-**[12] `gen_ai.data_source.id`:** Data sources are used by AI agents and RAG applications to store grounding data. A data source may be an external database, object store, document collection, website, or any other storage system used by the GenAI agent or application. The `gen_ai.data_source.id` SHOULD match the identifier used by the GenAI system rather than a name specific to the external storage, such as a database or object store. Semantic conventions referencing `gen_ai.data_source.id` MAY also leverage additional attributes, such as `db.*`, to further identify and describe the data source.
+**[7] `gen_ai.data_source.id`:** Data sources are used by AI agents and RAG applications to store grounding data. A data source may be an external database, object store, document collection, website, or any other storage system used by the GenAI agent or application. The `gen_ai.data_source.id` SHOULD match the identifier used by the GenAI system rather than a name specific to the external storage, such as a database or object store. Semantic conventions referencing `gen_ai.data_source.id` MAY also leverage additional attributes, such as `db.*`, to further identify and describe the data source.
 
-**[13] `gen_ai.output.type`:** When applicable and if the request includes an output format.
+**[8] `gen_ai.output.type`:** When applicable and if the request includes an output format.
 
-**[14] `gen_ai.output.type`:** This attribute SHOULD be used when the client requests output of a specific type. The model may return zero or more outputs of this type.
+**[9] `gen_ai.output.type`:** This attribute SHOULD be used when the client requests output of a specific type. The model may return zero or more outputs of this type.
 This attribute specifies the output modality and not the actual output format. For example, if an image is requested, the actual output could be a URL pointing to an image file.
 Additional output format details may be recorded in the future in the `gen_ai.output.{type}.*` attributes.
+
+**[10] `gen_ai.transfer.mode`:** When the instrumented framework or protocol explicitly exposes this invocation as a transfer.
+
+**[11] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer any `gen_ai.transfer.*` attribute from span
+hierarchy, tool names, timing, or application-specific conventions.
+
+**[12] `gen_ai.transfer.target.id`:** When `gen_ai.transfer.mode` is present and the target identifier is available.
+
+**[13] `gen_ai.transfer.target.name`:** When `gen_ai.transfer.mode` is present and the target name is available.
+
+**[14] `gen_ai.transfer.target.type`:** When `gen_ai.transfer.mode` is present and the target type is known.
 
 **[15] `server.port`:** When observed from the client side, and when communicating through an intermediary, `server.port` SHOULD represent the server port behind any intermediaries, for example proxies, if it's available.
 
