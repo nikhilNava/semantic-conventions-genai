@@ -625,6 +625,7 @@ def run_remote_a2a_agent_reference(topology_recorder):
             client_attributes = {
                 "gen_ai.operation.name": "invoke_agent",
                 "gen_ai.agent.name": agent_card.name,
+                "gen_ai.provider.name": agent_card.provider.organization,
                 "server.address": target_url.hostname or "localhost",
                 "server.port": target_url.port or 443,
             }

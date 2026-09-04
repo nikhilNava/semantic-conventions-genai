@@ -515,18 +515,14 @@ spans:
     note: |
       The `gen_ai.operation.name` SHOULD be `invoke_agent`.
 
-      The `gen_ai.agent.*` attributes identify the agent invoked over the remote
-      service.
-
-      Examples: OpenAI Assistants API, AWS Bedrock Agents, A2A protocol.
+      Examples: OpenAI Assistants API, AWS Bedrock Agents.
     stability: development
     attributes:
       - ref_group: attributes.gen_ai.invoke_agent.common
       - ref_group: attributes.gen_ai.usage.breakdown
       - ref_group: attributes.gen_ai.address_and_port
       - ref: gen_ai.provider.name
-        requirement_level:
-          conditionally_required: If the invoked agent is hosted by a named GenAI provider or service known to the instrumentation.
+        requirement_level: required
         sampling_relevant: true
       - ref: gen_ai.operation.name
         sampling_relevant: true
@@ -562,10 +558,6 @@ spans:
       Describes GenAI agent invocation within the same process.
     note: |
       The `gen_ai.operation.name` SHOULD be `invoke_agent`.
-
-      This span represents the execution of the agent identified by the
-      `gen_ai.agent.*` attributes. It does not represent the caller-owned
-      operation that transferred control to this agent.
 
       Examples: LangChain agents, CrewAI agents.
     stability: development

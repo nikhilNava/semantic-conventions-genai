@@ -10,7 +10,7 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.server.tasks.task_updater import TaskUpdater
-from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill, Part
+from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentProvider, AgentSkill, Part
 from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
@@ -50,6 +50,10 @@ def create_app(host: str, port: int) -> Starlette:
         name="weather-agent",
         description="Returns weather information for a requested location.",
         version="1.0.0",
+        provider=AgentProvider(
+            organization="example.weather",
+            url=f"http://{host}:{port}",
+        ),
         capabilities=AgentCapabilities(streaming=False),
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],

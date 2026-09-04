@@ -7,6 +7,7 @@
 | Attribute | Supporting Libraries |
 | --- | --- |
 | gen_ai.operation.name | [aws-bedrock-agent], [azure-ai-foundry], [google-adk], [google-genai], [openai-assistants] |
+| gen_ai.provider.name | [aws-bedrock-agent], [azure-ai-foundry], [google-adk], [google-genai], [openai-assistants] |
 
 ## Conditionally Required
 
@@ -19,7 +20,6 @@
 | gen_ai.conversation.id | [aws-bedrock-agent], [openai-assistants] |
 | gen_ai.data_source.id | (none) |
 | gen_ai.output.type | [azure-ai-foundry] |
-| gen_ai.provider.name | [aws-bedrock-agent], [azure-ai-foundry], [google-genai], [openai-assistants] |
 | gen_ai.request.choice.count | (none) |
 | gen_ai.request.seed | (none) |
 | server.port | [aws-bedrock-agent], [azure-ai-foundry], [google-adk], [openai-assistants] |
