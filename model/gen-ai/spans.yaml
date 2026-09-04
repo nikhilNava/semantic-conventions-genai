@@ -518,14 +518,15 @@ spans:
       The `gen_ai.agent.*` attributes identify the agent invoked over the remote
       service.
 
-      Examples: OpenAI Assistants API, AWS Bedrock Agents.
+      Examples: OpenAI Assistants API, AWS Bedrock Agents, A2A protocol.
     stability: development
     attributes:
       - ref_group: attributes.gen_ai.invoke_agent.common
       - ref_group: attributes.gen_ai.usage.breakdown
       - ref_group: attributes.gen_ai.address_and_port
       - ref: gen_ai.provider.name
-        requirement_level: required
+        requirement_level:
+          conditionally_required: If the invoked agent is hosted by a named GenAI provider or service known to the instrumentation.
         sampling_relevant: true
       - ref: gen_ai.operation.name
         sampling_relevant: true

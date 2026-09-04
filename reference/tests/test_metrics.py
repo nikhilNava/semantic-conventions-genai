@@ -97,6 +97,12 @@ def test_invoke_agent_client_does_not_duplicate_transfer_target():
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in attributes)
 
 
+def test_invoke_agent_client_provider_is_conditional_for_generic_services():
+    spec = span_specs()["invoke_agent_client"]
+    assert "gen_ai.provider.name" not in spec.required
+    assert "gen_ai.provider.name" in spec.conditionally_required
+
+
 def test_committed_google_adk_remote_agent_covers_internal_and_client_spans():
     path = Path(__file__).parents[1] / "scenarios" / "google-adk" / "data.json"
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -115,7 +121,7 @@ def test_committed_langchain_transfer_coverage():
 
     for attribute in _TRANSFER_ATTRIBUTES:
         assert execute_tool[attribute] == "present", attribute
-    assert execute_tool["gen_ai.transfer.target.type"] == "absent"
+    assert execute_tool["gen_ai.transfer.target.type"] == "present"
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in langchain.spans["invoke_agent_internal"])
 
     for library in ("google-adk", "openai-agents"):
@@ -139,6 +145,7 @@ if __name__ == "__main__":
     test_span_types_absent_from_a_data_file_are_not_reported()
     test_span_specs_are_named_as_the_registry_names_them()
     test_invoke_agent_client_does_not_duplicate_transfer_target()
+    test_invoke_agent_client_provider_is_conditional_for_generic_services()
     test_committed_google_adk_remote_agent_covers_internal_and_client_spans()
     test_committed_langchain_transfer_coverage()
     test_interaction_type_is_removed_from_committed_scenarios()

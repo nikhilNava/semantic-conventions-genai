@@ -10,7 +10,8 @@
       "gen_ai.tool.name",
       "gen_ai.tool.type",
       "gen_ai.transfer.mode",
-      "gen_ai.transfer.target.name"
+      "gen_ai.transfer.target.name",
+      "gen_ai.transfer.target.type"
     ],
     "gen_ai.invoke_agent.internal": [
       "gen_ai.agent.name",

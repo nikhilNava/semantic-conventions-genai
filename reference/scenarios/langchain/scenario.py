@@ -20,7 +20,7 @@ _reference_tracer = reference_tracer()
 
 class TransferSpanRecorder(SpanProcessor):
     def __init__(self):
-        self.transfers: set[tuple[str, str, str, str]] = set()
+        self.transfers: set[tuple[str, str, str, str, str]] = set()
 
     def on_start(self, span, parent_context=None):
         pass
@@ -36,6 +36,7 @@ class TransferSpanRecorder(SpanProcessor):
                 str(attributes.get("gen_ai.agent.name")),
                 str(transfer_mode),
                 str(attributes.get("gen_ai.transfer.target.name")),
+                str(attributes.get("gen_ai.transfer.target.type")),
             )
         )
 
@@ -47,7 +48,7 @@ class TransferSpanRecorder(SpanProcessor):
 
     def assert_complete(self):
         assert self.transfers == {
-            ("execute_tool", "triage-agent", "pass_control", "weather-agent"),
+            ("execute_tool", "triage-agent", "pass_control", "weather-agent", "agent"),
         }
 
 
@@ -304,6 +305,7 @@ async def run_tool_handoff_reference():
 
             tool_span.set_attribute("gen_ai.transfer.mode", "pass_control")
             tool_span.set_attribute("gen_ai.transfer.target.name", command.goto)
+            tool_span.set_attribute("gen_ai.transfer.target.type", "agent")
             tool_span.set_attribute("gen_ai.tool.call.result", f"goto={command.goto}")
             return command
 
