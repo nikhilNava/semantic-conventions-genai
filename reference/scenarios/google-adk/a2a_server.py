@@ -1,4 +1,4 @@
-"""Minimal remote A2A agent used by the reference client scenario."""
+"""Minimal remote A2A agent used by the Google ADK reference scenario."""
 
 import argparse
 
@@ -10,7 +10,7 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.server.tasks.task_updater import TaskUpdater
-from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill, Part, TaskState
+from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill, Part
 from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
@@ -41,7 +41,7 @@ class WeatherAgentExecutor(AgentExecutor):
         if task is None:
             raise ValueError("A2A cancellation must identify a task")
         updater = TaskUpdater(event_queue, task.id, task.context_id)
-        await updater.update_status(TaskState.TASK_STATE_CANCELED)
+        await updater.cancel()
 
 
 def create_app(host: str, port: int) -> Starlette:

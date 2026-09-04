@@ -97,13 +97,15 @@ def test_invoke_agent_client_does_not_duplicate_transfer_target():
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in attributes)
 
 
-def test_committed_a2a_client_uses_invoke_agent_without_transfer_attributes():
-    path = Path(__file__).parents[1] / "scenarios" / "a2a" / "data.json"
+def test_committed_google_adk_remote_agent_covers_internal_and_client_spans():
+    path = Path(__file__).parents[1] / "scenarios" / "google-adk" / "data.json"
     data = json.loads(path.read_text(encoding="utf-8"))
-    invoke_agent = data["spans"]["gen_ai.invoke_agent.client"]
 
-    assert "gen_ai.agent.name" in invoke_agent
-    assert not any(attribute.startswith("gen_ai.transfer.") for attribute in invoke_agent)
+    invoke_agent_internal = data["spans"]["gen_ai.invoke_agent.internal"]
+    invoke_agent_client = data["spans"]["gen_ai.invoke_agent.client"]
+    assert not any(attribute.startswith("gen_ai.transfer.") for attribute in invoke_agent_internal)
+    assert "gen_ai.agent.name" in invoke_agent_client
+    assert not any(attribute.startswith("gen_ai.transfer.") for attribute in invoke_agent_client)
 
 
 def test_committed_langchain_transfer_coverage():
@@ -137,7 +139,7 @@ if __name__ == "__main__":
     test_span_types_absent_from_a_data_file_are_not_reported()
     test_span_specs_are_named_as_the_registry_names_them()
     test_invoke_agent_client_does_not_duplicate_transfer_target()
-    test_committed_a2a_client_uses_invoke_agent_without_transfer_attributes()
+    test_committed_google_adk_remote_agent_covers_internal_and_client_spans()
     test_committed_langchain_transfer_coverage()
     test_interaction_type_is_removed_from_committed_scenarios()
     print("ok")
