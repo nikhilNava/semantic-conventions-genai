@@ -132,14 +132,6 @@
     },
     {
       "id": "genai_expected_attribute_missing",
-      "message": "Span 'invoke_agent weather-agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.provider.name'",
-      "context": {
-        "missing_attribute": "gen_ai.provider.name",
-        "operation": "invoke_agent"
-      }
-    },
-    {
-      "id": "genai_expected_attribute_missing",
       "message": "Span 'invoke_agent weather-agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.response.finish_reasons'",
       "context": {
         "missing_attribute": "gen_ai.response.finish_reasons",
