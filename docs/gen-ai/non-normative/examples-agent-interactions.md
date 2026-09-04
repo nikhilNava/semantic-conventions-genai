@@ -48,6 +48,9 @@ When an agent invokes another agent through an API or protocol, use the existing
 `invoke_agent` CLIENT span. `gen_ai.agent.*` identifies the invoked agent;
 `gen_ai.transfer.*` is not recorded.
 
+For example, an A2A client can discover a remote agent from its Agent Card and
+invoke it with the protocol's `SendMessage` operation.
+
 The target process can independently record the agent's execution as an
 `invoke_agent` INTERNAL span. When trace context is propagated, that execution
 can be a descendant of the CLIENT span.

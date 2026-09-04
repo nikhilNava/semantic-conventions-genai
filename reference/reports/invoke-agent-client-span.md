@@ -6,23 +6,23 @@
 
 | Attribute | Supporting Libraries |
 | --- | --- |
-| gen_ai.operation.name | [aws-bedrock-agent], [azure-ai-foundry], [google-genai], [openai-assistants] |
+| gen_ai.operation.name | [a2a], [aws-bedrock-agent], [azure-ai-foundry], [google-genai], [openai-assistants] |
 | gen_ai.provider.name | [aws-bedrock-agent], [azure-ai-foundry], [google-genai], [openai-assistants] |
 
 ## Conditionally Required
 
 | Attribute | Supporting Libraries |
 | --- | --- |
-| gen_ai.agent.description | [openai-assistants] |
+| gen_ai.agent.description | [a2a], [openai-assistants] |
 | gen_ai.agent.id | [aws-bedrock-agent], [openai-assistants] |
-| gen_ai.agent.name | [azure-ai-foundry], [google-genai], [openai-assistants] |
+| gen_ai.agent.name | [a2a], [azure-ai-foundry], [google-genai], [openai-assistants] |
 | gen_ai.agent.version | [aws-bedrock-agent] |
-| gen_ai.conversation.id | [aws-bedrock-agent], [openai-assistants] |
+| gen_ai.conversation.id | [a2a], [aws-bedrock-agent], [openai-assistants] |
 | gen_ai.data_source.id | (none) |
 | gen_ai.output.type | [azure-ai-foundry] |
 | gen_ai.request.choice.count | (none) |
 | gen_ai.request.seed | (none) |
-| server.port | [aws-bedrock-agent], [azure-ai-foundry], [openai-assistants] |
+| server.port | [a2a], [aws-bedrock-agent], [azure-ai-foundry], [openai-assistants] |
 
 ## Recommended
 
@@ -50,17 +50,18 @@
 | gen_ai.usage.text.cache_read.input_tokens | (none) |
 | gen_ai.usage.text.input_tokens | (none) |
 | gen_ai.usage.text.output_tokens | (none) |
-| server.address | [aws-bedrock-agent], [azure-ai-foundry], [openai-assistants] |
+| server.address | [a2a], [aws-bedrock-agent], [azure-ai-foundry], [openai-assistants] |
 
 ## Opt-In
 
 | Attribute | Supporting Libraries |
 | --- | --- |
-| gen_ai.input.messages | [aws-bedrock-agent], [azure-ai-foundry], [openai-assistants] |
-| gen_ai.output.messages | [aws-bedrock-agent], [azure-ai-foundry], [openai-assistants] |
+| gen_ai.input.messages | [a2a], [aws-bedrock-agent], [azure-ai-foundry], [openai-assistants] |
+| gen_ai.output.messages | [a2a], [aws-bedrock-agent], [azure-ai-foundry], [openai-assistants] |
 | gen_ai.system_instructions | [azure-ai-foundry], [openai-assistants] |
 | gen_ai.tool.definitions | [azure-ai-foundry], [openai-assistants] |
 
+[a2a]: ../scenarios/a2a/scenario.py
 [aws-bedrock-agent]: ../scenarios/aws-bedrock-agent/scenario.py
 [azure-ai-foundry]: ../scenarios/azure-ai-foundry/scenario.py
 [google-genai]: ../scenarios/google-genai/scenario.py

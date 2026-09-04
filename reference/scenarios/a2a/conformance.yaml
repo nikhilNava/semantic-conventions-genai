@@ -1,0 +1,13 @@
+runner: genai-conformance
+instrumented_library: a2a
+instrumentation_library: reference
+
+server:
+  run: uv run --frozen --python 3.12 --project reference/scenarios/a2a python reference/scenarios/a2a/server.py --host 127.0.0.1 --port ${PORT}
+
+env:
+  A2A_SERVER_URL: ${MOCK_SERVER_URL}
+
+scenarios:
+  reference:
+    run: uv run --frozen --python 3.12 --project . python scenario.py
