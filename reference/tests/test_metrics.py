@@ -48,6 +48,25 @@ def test_execute_tool_duration_does_not_include_transfer_attributes():
     assert "gen_ai.transfer." not in execute_tool_duration
 
 
+def test_execute_tool_transfer_is_a_span_refinement():
+    spans_model = (Path(__file__).parents[2] / "model" / "gen-ai" / "spans.yaml").read_text(encoding="utf-8")
+    spans, refinements = spans_model.split("span_refinements:", 1)
+    execute_tool = spans.split("- type: gen_ai.execute_tool.internal", 1)[1].split(
+        "- type: gen_ai.invoke_workflow.internal", 1
+    )[0]
+
+    assert "gen_ai.transfer." not in execute_tool
+
+    transfer = refinements.split("- id: gen_ai.execute_tool.transfer.internal", 1)[1]
+    assert "ref: gen_ai.execute_tool.internal" in transfer
+    for attribute in (
+        "gen_ai.transfer.mode",
+        "gen_ai.transfer.target.type",
+        "gen_ai.transfer.target.name",
+    ):
+        assert f"- ref: {attribute}" in transfer
+
+
 def test_committed_metrics_do_not_include_transfer_attributes():
     for path in (Path(__file__).parents[1] / "scenarios").glob("*/data.json"):
         metrics = json.loads(path.read_text(encoding="utf-8")).get("metrics", {})
@@ -109,18 +128,19 @@ def test_committed_google_adk_remote_agent_covers_internal_and_client_spans():
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in invoke_agent_client)
 
 
-def test_committed_langchain_transfer_coverage():
-    entries = {entry.library: entry for entry in load_scenario_data_files()}
-    langchain = entries["langchain"]
-    execute_tool = langchain.spans["execute_tool"]
+def test_committed_transfer_scenarios_emit_transfer_attributes():
+    scenarios_dir = Path(__file__).parents[1] / "scenarios"
 
-    for attribute in _TRANSFER_ATTRIBUTES:
-        assert execute_tool[attribute] == "present", attribute
-    assert execute_tool["gen_ai.transfer.target.type"] == "present"
-    assert not any(attribute.startswith("gen_ai.transfer.") for attribute in langchain.spans["invoke_agent_internal"])
+    for library in ("google-adk", "langchain", "openai-agents"):
+        data = json.loads((scenarios_dir / library / "data.json").read_text(encoding="utf-8"))
+        execute_tool = data["spans"]["gen_ai.execute_tool.internal"]
 
-    for library in ("google-adk", "openai-agents"):
-        assert entries[library].spans["execute_tool"]["gen_ai.transfer.target.type"] == "present"
+        for attribute in _TRANSFER_ATTRIBUTES:
+            assert attribute in execute_tool, (library, attribute)
+        assert "gen_ai.transfer.target.type" in execute_tool, library
+
+        invoke_agent_internal = data["spans"].get("gen_ai.invoke_agent.internal", [])
+        assert not any(attribute.startswith("gen_ai.transfer.") for attribute in invoke_agent_internal), library
 
 
 def test_interaction_type_is_removed_from_committed_scenarios():
@@ -133,6 +153,7 @@ if __name__ == "__main__":
     test_metric_specs_expose_recommended_agent_name()
     test_metric_specs_are_named_as_the_registry_names_them()
     test_execute_tool_duration_does_not_include_transfer_attributes()
+    test_execute_tool_transfer_is_a_span_refinement()
     test_committed_metrics_do_not_include_transfer_attributes()
     test_committed_google_adk_metrics_round_trip()
     test_registry_span_names_map_onto_report_keys()
@@ -141,6 +162,6 @@ if __name__ == "__main__":
     test_span_specs_are_named_as_the_registry_names_them()
     test_invoke_agent_client_does_not_duplicate_transfer_target()
     test_committed_google_adk_remote_agent_covers_internal_and_client_spans()
-    test_committed_langchain_transfer_coverage()
+    test_committed_transfer_scenarios_emit_transfer_attributes()
     test_interaction_type_is_removed_from_committed_scenarios()
     print("ok")
