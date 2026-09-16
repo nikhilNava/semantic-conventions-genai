@@ -56,7 +56,7 @@ For a transfer that does not return control to the source agent, the
 When an agent invokes another agent through an API or protocol, use the existing
 `invoke_agent` CLIENT span. `gen_ai.agent.*` identifies the invoked agent.
 When the library explicitly exposes the immediate logical caller, use the
-caller-aware refinement:
+[caller-aware refinement](../gen-ai-agent-spans.md#caller-aware-remote-invocation):
 
 - `gen_ai.caller.type` identifies whether that caller is an agent or workflow.
 - `gen_ai.caller.name` identifies the immediate logical caller.

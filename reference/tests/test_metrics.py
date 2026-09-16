@@ -123,6 +123,9 @@ def test_caller_refinement_is_documented_with_workflow_example():
     assert "`gen_ai.caller.name`" in interaction_examples
     assert "weather_workflow" in interaction_examples
     assert "gen_ai.transfer.*` is not recorded" in interaction_examples
+    assert (
+        "[caller-aware refinement](../gen-ai-agent-spans.md#caller-aware-remote-invocation)" in interaction_examples
+    )
 
 
 def test_committed_metrics_do_not_include_transfer_attributes():
