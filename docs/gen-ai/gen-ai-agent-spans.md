@@ -1117,14 +1117,15 @@ has low cardinality. Otherwise, it SHOULD be
 | [`gen_ai.tool.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Required` | string | Name of the tool utilized by the agent. | `Flights` |
 | [`error.type`](https://github.com/open-telemetry/semantic-conventions/blob/v1.44.0/docs/registry/attributes/error.md) | ![Stable](https://img.shields.io/badge/-stable-lightgreen) | `Conditionally Required` If the operation ended in an error. | string | Describes a class of error the operation ended with. [2] | `timeout`; `java.net.UnknownHostException`; `server_certificate_invalid`; `500` |
 | [`gen_ai.agent.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` When applicable. | string | The human-readable name of the agent executing the tool. | `Math Tutor`; `Fiction Writer` |
-| [`gen_ai.transfer.mode`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [3] | string | Describes how control passes to the transfer target. [4] | `return_to_caller`; `pass_control` |
-| [`gen_ai.transfer.target.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [5] | string | The human-readable name of the transfer target. | `weather_agent`; `human_support` |
-| [`gen_ai.transfer.target.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [6] | string | The type of the transfer target. | `agent`; `human`; `workflow` |
+| [`gen_ai.conversation.id`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` If available. | string | The unique identifier for a conversation (session, thread), used to store and correlate messages within this conversation. [3] | `conv_5j66UpCpwteGg4YSxUnt7lPY` |
+| [`gen_ai.transfer.mode`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [4] | string | Describes how control passes to the transfer target. [5] | `return_to_caller`; `pass_control` |
+| [`gen_ai.transfer.target.name`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [6] | string | The human-readable name of the transfer target. | `weather_agent`; `human_support` |
+| [`gen_ai.transfer.target.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Conditionally Required` [7] | string | The type of the transfer target. | `agent`; `human`; `workflow` |
 | [`gen_ai.tool.call.id`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` If available. | string | The tool call identifier. | `call_mszuSIzqtI65i1wAUOE8w5H4` |
-| [`gen_ai.tool.description`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` If available. | string | The tool description. [7] | `Multiply two numbers` |
-| [`gen_ai.tool.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` If available. | string | Type of the tool utilized by the agent [8] | `function`; `extension`; `datastore` |
-| [`gen_ai.tool.call.arguments`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Opt-In` | any | Parameters passed to the tool call. [9] | {<br>&nbsp;&nbsp;&nbsp;&nbsp;"location": "San Francisco?",<br>&nbsp;&nbsp;&nbsp;&nbsp;"date": "2025-10-01"<br>} |
-| [`gen_ai.tool.call.result`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Opt-In` | any | The result returned by the tool call (if any and if execution was successful). [10] | {<br>&nbsp;&nbsp;"temperature_range": {<br>&nbsp;&nbsp;&nbsp;&nbsp;"high": 75,<br>&nbsp;&nbsp;&nbsp;&nbsp;"low": 60<br>&nbsp;&nbsp;},<br>&nbsp;&nbsp;"conditions": "sunny"<br>} |
+| [`gen_ai.tool.description`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` If available. | string | The tool description. [8] | `Multiply two numbers` |
+| [`gen_ai.tool.type`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Recommended` If available. | string | Type of the tool utilized by the agent [9] | `function`; `extension`; `datastore` |
+| [`gen_ai.tool.call.arguments`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Opt-In` | any | Parameters passed to the tool call. [10] | {<br>&nbsp;&nbsp;&nbsp;&nbsp;"location": "San Francisco?",<br>&nbsp;&nbsp;&nbsp;&nbsp;"date": "2025-10-01"<br>} |
+| [`gen_ai.tool.call.result`](/docs/registry/attributes/gen-ai.md) | ![Development](https://img.shields.io/badge/-development-blue) | `Opt-In` | any | The result returned by the tool call (if any and if execution was successful). [11] | {<br>&nbsp;&nbsp;"temperature_range": {<br>&nbsp;&nbsp;&nbsp;&nbsp;"high": 75,<br>&nbsp;&nbsp;&nbsp;&nbsp;"low": 60<br>&nbsp;&nbsp;},<br>&nbsp;&nbsp;"conditions": "sunny"<br>} |
 
 **[1] `gen_ai.operation.name`:** If one of the predefined values applies, but specific system uses a different name it's RECOMMENDED to document it in the semantic conventions for specific GenAI system and use system-specific name in the instrumentation. If a different name is not documented, instrumentation libraries SHOULD use applicable predefined value.
 
@@ -1132,27 +1133,46 @@ has low cardinality. Otherwise, it SHOULD be
 the canonical name of exception that occurred, or another low-cardinality error identifier.
 Instrumentations SHOULD document the list of errors they report.
 
-**[3] `gen_ai.transfer.mode`:** When the instrumented framework or protocol explicitly exposes the tool call as a transfer.
+**[3] `gen_ai.conversation.id`:** Instrumentations SHOULD populate conversation id when they have an identifier
+for the conversation readily available for a given operation, for example:
 
-**[4] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer any `gen_ai.transfer.*` attribute from span
+- when the client framework being instrumented manages conversation history
+(see [LlamaIndex chat store](https://docs.llamaindex.ai/en/stable/module_guides/storing/chat_stores/),
+[LangChain `session_id`](https://reference.langchain.com/python/langchain-core/runnables/history/RunnableWithMessageHistory),
+and [Google ADK sessions](https://adk.dev/sessions/session))
+- when instrumenting GenAI client libraries that maintain a conversation on the backend
+(see [AWS Bedrock agent sessions](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-session-state.html),
+[OpenAI Assistant threads](https://platform.openai.com/docs/api-reference/threads))
+
+When no identifier for the conversation is available, instrumentations SHOULD NOT
+populate conversation id. For example, a new UUID, a trace identifier, or a hash
+of request content SHOULD NOT be used as a fallback value.
+
+Application developers that manage conversation history MAY add conversation id to GenAI and other
+spans or logs using custom span or log record processors or hooks provided by instrumentation
+libraries.
+
+**[4] `gen_ai.transfer.mode`:** When the instrumented framework or protocol explicitly exposes the tool call as a transfer.
+
+**[5] `gen_ai.transfer.mode`:** Instrumentations MUST NOT infer any `gen_ai.transfer.*` attribute from span
 hierarchy, tool names, timing, or application-specific conventions.
 
-**[5] `gen_ai.transfer.target.name`:** When `gen_ai.transfer.mode` is present and the target name is available.
+**[6] `gen_ai.transfer.target.name`:** When `gen_ai.transfer.mode` is present and the target name is available.
 
-**[6] `gen_ai.transfer.target.type`:** When `gen_ai.transfer.mode` is present and the target type is known.
+**[7] `gen_ai.transfer.target.type`:** When `gen_ai.transfer.mode` is present and the target type is known.
 
-**[7] `gen_ai.tool.description`:**
+**[8] `gen_ai.tool.description`:**
 
 > [!WARNING]
 > This attribute may contain sensitive information.
 
-**[8] `gen_ai.tool.type`:** Extension: A tool executed on the agent-side to directly call external APIs, bridging the gap between the agent and real-world systems.
+**[9] `gen_ai.tool.type`:** Extension: A tool executed on the agent-side to directly call external APIs, bridging the gap between the agent and real-world systems.
   Agent-side operations involve actions that are performed by the agent on the server or within the agent's controlled environment.
 Function: A tool executed on the client-side, where the agent generates parameters for a predefined function, and the client executes the logic.
   Client-side operations are actions taken on the user's end or within the client application.
 Datastore: A tool used by the agent to access and query structured or unstructured external data for retrieval-augmented tasks or knowledge updates.
 
-**[9] `gen_ai.tool.call.arguments`:**
+**[10] `gen_ai.tool.call.arguments`:**
 
 > [!WARNING]
 > This attribute may contain sensitive information.
@@ -1165,7 +1185,7 @@ Instrumentations MUST follow [JSON schema](/model/gen-ai/gen-ai-tool-call-argume
 
 When the attribute is recorded on events, it MUST be recorded in structured form. When recorded on spans, it MAY be recorded as a JSON string if structured format is not supported and SHOULD be recorded in structured form otherwise.
 
-**[10] `gen_ai.tool.call.result`:**
+**[11] `gen_ai.tool.call.result`:**
 
 > [!WARNING]
 > This attribute may contain sensitive information.
@@ -1208,7 +1228,7 @@ and SHOULD be provided **at span creation time** (if provided at all):
 | `delete_memory_store` | Delete or deprovision a memory store | ![Development](https://img.shields.io/badge/-development-blue) |
 | `embeddings` | Embeddings operation such as [OpenAI Create embeddings API](https://platform.openai.com/docs/api-reference/embeddings/create) | ![Development](https://img.shields.io/badge/-development-blue) |
 | `execute_tool` | Execute a tool | ![Development](https://img.shields.io/badge/-development-blue) |
-| `fetch_response` | Fetch a previously generated model response by its identifier, without performing inference, such as [OpenAI Get a model response](https://platform.openai.com/docs/api-reference/responses/get) [11] | ![Development](https://img.shields.io/badge/-development-blue) |
+| `fetch_response` | Fetch a previously generated model response by its identifier, without performing inference, such as [OpenAI Get a model response](https://platform.openai.com/docs/api-reference/responses/get) [12] | ![Development](https://img.shields.io/badge/-development-blue) |
 | `generate_content` | Multimodal content generation operation such as [Gemini Generate Content](https://ai.google.dev/api/generate-content) | ![Development](https://img.shields.io/badge/-development-blue) |
 | `invoke_agent` | Invoke GenAI agent | ![Development](https://img.shields.io/badge/-development-blue) |
 | `invoke_workflow` | Invoke GenAI workflow | ![Development](https://img.shields.io/badge/-development-blue) |
@@ -1219,7 +1239,7 @@ and SHOULD be provided **at span creation time** (if provided at all):
 | `update_memory` | Update existing memory records | ![Development](https://img.shields.io/badge/-development-blue) |
 | `upsert_memory` | Create or update memory records without the caller choosing which | ![Development](https://img.shields.io/badge/-development-blue) |
 
-**[11]:** Instrumentations SHOULD NOT report token usage (as attributes or metrics) for this operation.
+**[12]:** Instrumentations SHOULD NOT report token usage (as attributes or metrics) for this operation.
 
 ---
 
