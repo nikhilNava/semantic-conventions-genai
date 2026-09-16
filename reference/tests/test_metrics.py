@@ -55,16 +55,25 @@ def test_execute_tool_transfer_is_a_span_refinement():
         "- type: gen_ai.invoke_workflow.internal", 1
     )[0]
 
-    assert "gen_ai.transfer." not in execute_tool
-
     transfer = refinements.split("- id: gen_ai.execute_tool.transfer.internal", 1)[1]
+
+    assert "applicable refinement" in execute_tool
+    assert "SHOULD NOT record two different spans for one call" in execute_tool
+
     assert "ref: gen_ai.execute_tool.internal" in transfer
+    assert "execute_tool {gen_ai.tool.name} {gen_ai.transfer.target.name}" in transfer
+    assert "even when the transfer attempt fails" in transfer
+    assert "does not produce an additional span" in transfer
+
     for attribute in (
         "gen_ai.transfer.mode",
         "gen_ai.transfer.target.type",
         "gen_ai.transfer.target.name",
     ):
+        assert f"- ref: {attribute}" in execute_tool
         assert f"- ref: {attribute}" in transfer
+
+    assert "sampling_relevant: true" not in transfer
 
 
 def test_committed_metrics_do_not_include_transfer_attributes():
