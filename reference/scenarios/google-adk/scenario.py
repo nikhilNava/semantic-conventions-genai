@@ -528,7 +528,7 @@ def run_multi_agent_delegation_reference():
                 **transfer_attributes,
             }
             with _reference_tracer.start_as_current_span(
-                f"execute_tool {agent_tool.name}", attributes=tool_span_attributes
+                f"execute_tool {agent_tool.name} {specialist.name}", attributes=tool_span_attributes
             ) as tool_span:
                 if tool_context.function_call_id:
                     tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)

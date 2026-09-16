@@ -76,6 +76,28 @@ def test_execute_tool_transfer_is_a_span_refinement():
     assert "sampling_relevant: true" not in transfer
 
 
+def test_transfer_examples_use_target_qualified_names_when_available():
+    repository_root = Path(__file__).parents[2]
+    scenarios_dir = Path(__file__).parents[1] / "scenarios"
+
+    google_adk = (scenarios_dir / "google-adk" / "scenario.py").read_text(encoding="utf-8")
+    openai_agents = (scenarios_dir / "openai-agents" / "scenario.py").read_text(encoding="utf-8")
+    langchain = (scenarios_dir / "langchain" / "scenario.py").read_text(encoding="utf-8")
+    base_spans = (repository_root / "docs" / "gen-ai" / "gen-ai-spans.md").read_text(encoding="utf-8")
+    agent_spans = (repository_root / "docs" / "gen-ai" / "gen-ai-agent-spans.md").read_text(encoding="utf-8")
+    interaction_examples = (
+        repository_root / "docs" / "gen-ai" / "non-normative" / "examples-agent-interactions.md"
+    ).read_text(encoding="utf-8")
+
+    assert 'f"execute_tool {agent_tool.name} {specialist.name}"' in google_adk
+    assert 'f"execute_tool {weather_tool.name} {specialist.name}"' in openai_agents
+    assert '"execute_tool transfer_to_weather_agent"' in langchain
+    assert "[tool-based transfer refinement](gen-ai-agent-spans.md#tool-based-transfer)" in base_spans
+    assert "`execute_tool transfer_to_weather_agent weather_agent`" in agent_spans
+    assert "`execute_tool transfer_to_weather_agent weather_agent`" in interaction_examples
+    assert "`execute_tool transfer_to_weather_agent`" in interaction_examples
+
+
 def test_committed_metrics_do_not_include_transfer_attributes():
     for path in (Path(__file__).parents[1] / "scenarios").glob("*/data.json"):
         metrics = json.loads(path.read_text(encoding="utf-8")).get("metrics", {})
@@ -163,6 +185,7 @@ if __name__ == "__main__":
     test_metric_specs_are_named_as_the_registry_names_them()
     test_execute_tool_duration_does_not_include_transfer_attributes()
     test_execute_tool_transfer_is_a_span_refinement()
+    test_transfer_examples_use_target_qualified_names_when_available()
     test_committed_metrics_do_not_include_transfer_attributes()
     test_committed_google_adk_metrics_round_trip()
     test_registry_span_names_map_onto_report_keys()

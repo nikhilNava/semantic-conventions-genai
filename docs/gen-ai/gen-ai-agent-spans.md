@@ -1066,10 +1066,24 @@ Describes a tool call that transfers work or control to another target.
 This refinement applies when the instrumented framework or protocol
 explicitly exposes a tool call as a transfer.
 
+Examples include:
+
+- [Google ADK agent tools](https://google.github.io/adk-docs/tools-custom/function-tools/#agent-tool)
+  that invoke a configured sub-agent;
+- [LangChain or LangGraph transfer tools](https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs)
+  that return a `Command` targeting another agent node;
+- [OpenAI Agents tools](https://openai.github.io/openai-agents-python/tools/#agents-as-tools)
+  created from another agent.
+
 `gen_ai.transfer.mode` records whether the agent executing the tool waits
 for a result and resumes or passes control to the target.
 `gen_ai.transfer.target.*` identifies that target. `gen_ai.agent.*`
 continues to identify the agent executing the tool.
+
+The exposed transfer mode and target SHOULD be recorded even when the transfer attempt fails.
+
+Applying this refinement changes the semantic contract of the existing
+execute-tool span and does not produce an additional span.
 
 Instrumentations MUST NOT infer transfer semantics from span hierarchy,
 tool names, timing, or application-specific conventions.
@@ -1083,7 +1097,11 @@ These conventions do not define a caller-owned span for a dedicated
 in-process non-tool transfer. When the source and target agent executions
 are observable, each is recorded as a `gen_ai.invoke_agent` internal span.
 
-**Span name** SHOULD be `execute_tool {gen_ai.tool.name}`.
+**Span name** SHOULD be
+`execute_tool {gen_ai.tool.name} {gen_ai.transfer.target.name}` when
+`gen_ai.transfer.target.name` is readily available at span creation and
+has low cardinality. Otherwise, it SHOULD be
+`execute_tool {gen_ai.tool.name}`.
 
 **Span kind** SHOULD be `INTERNAL`.
 
@@ -1232,10 +1250,10 @@ When an agent directs work or passes control to another agent, use the span
 that corresponds to the operation exposed by the instrumented framework or
 protocol:
 
-| Framework or protocol operation | Caller-owned span |
-| --- | --- |
-| A tool call transfers work or control | [`execute_tool` transfer refinement](#tool-based-transfer) |
-| An API or protocol invokes another agent | [`invoke_agent` CLIENT](#invoke-agent-client-span) |
+| Framework or protocol operation | Caller-owned span | Example span name |
+| --- | --- | --- |
+| A tool call transfers work or control | [`execute_tool` transfer refinement](#tool-based-transfer) | `execute_tool transfer_to_weather_agent weather_agent` |
+| An API or protocol invokes another agent | [`invoke_agent` CLIENT](#invoke-agent-client-span) | `invoke_agent weather_agent` |
 
 The tool-based transfer refinement records `gen_ai.transfer.*` only when the
 framework explicitly exposes the tool call as a transfer. `gen_ai.agent.*`

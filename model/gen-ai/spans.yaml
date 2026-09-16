@@ -590,8 +590,9 @@ spans:
       own code and to manually instrument any tool calls that automatic
       instrumentations do not cover.
 
-      Some tool calls have specialized semantic conventions. Instrumentations
-      SHOULD apply the applicable refinement and SHOULD NOT record two different spans for one call.
+      Some tool calls have specialized semantic conventions, such as the
+      [tool-based transfer refinement](gen-ai-agent-spans.md#tool-based-transfer).
+      Instrumentations SHOULD apply the applicable refinement and SHOULD NOT record two different spans for one call.
     stability: development
     attributes:
       - ref_group: attributes.gen_ai.error

@@ -187,7 +187,7 @@ async def run_agent_as_tool_delegation():
             **transfer_attributes,
         }
         with _reference_tracer.start_as_current_span(
-            f"execute_tool {weather_tool.name}", attributes=tool_span_attributes
+            f"execute_tool {weather_tool.name} {specialist.name}", attributes=tool_span_attributes
         ) as tool_span:
             tool_span.set_attribute("gen_ai.tool.call.id", tool_context.tool_call_id)
             tool_span.set_attribute("gen_ai.tool.call.arguments", input_json)

@@ -17,13 +17,19 @@ generic `gen_ai.execute_tool.internal` span:
 The target agent's execution can be recorded as a separate `invoke_agent`
 INTERNAL span when it is observable.
 
+When the target name is available at span creation, a transfer to the weather
+agent can use the span name
+`execute_tool transfer_to_weather_agent weather_agent`. Frameworks that expose
+the authoritative target only after the span starts use the fallback
+`execute_tool transfer_to_weather_agent`.
+
 ```mermaid
 flowchart LR
   subgraph P["PROCESS: multi-agent runtime"]
     direction LR
     subgraph S["SOURCE AGENT"]
       S1["invoke_agent source [INTERNAL]"]
-      S2["execute_tool transfer [INTERNAL]<br/>agent.name = source<br/>transfer.mode = return_to_caller<br/>transfer.target.type = agent<br/>transfer.target.name = target"]
+      S2["execute_tool transfer_to_weather_agent weather_agent [INTERNAL]<br/>agent.name = source<br/>transfer.mode = return_to_caller<br/>transfer.target.type = agent<br/>transfer.target.name = weather_agent"]
       S1 --> S2
     end
     subgraph T["TARGET AGENT"]
@@ -38,9 +44,10 @@ For a transfer that does not return control to the source agent, the
 
 | Property | Value |
 | --- | --- |
+| Span name | `execute_tool transfer_to_weather_agent weather_agent` |
 | `gen_ai.agent.name` | `"source"` |
 | `gen_ai.transfer.mode` | `"pass_control"` |
-| `gen_ai.transfer.target.name` | `"target"` |
+| `gen_ai.transfer.target.name` | `"weather_agent"` |
 | `gen_ai.transfer.target.type` | `"agent"` |
 
 ## Agent invocation through an API or protocol
