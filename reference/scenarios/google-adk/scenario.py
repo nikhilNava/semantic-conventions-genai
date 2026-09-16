@@ -76,29 +76,49 @@ class SpanCounter(SpanProcessor):
 
 
 class A2ATopologyRecorder(SpanProcessor):
-    """Verify the remote-agent CLIENT span is nested under its ADK agent run."""
+    """Verify the A2A CLIENT span is nested under its agent and workflow runs."""
 
     def __init__(self):
+        self.workflow_span_id = None
         self.internal_span_id = None
+        self.internal_parent_span_id = None
         self.client_parent_span_id = None
+        self.client_has_caller_attributes = None
 
     def on_start(self, span, parent_context=None):
         pass
 
     def on_end(self, span: ReadableSpan):
         attributes = span.attributes or {}
-        if attributes.get("gen_ai.operation.name") != "invoke_agent":
-            return
-        if span.kind == SpanKind.INTERNAL and attributes.get("gen_ai.agent.name") == "remote_weather_agent":
+        operation_name = attributes.get("gen_ai.operation.name")
+        if operation_name == "invoke_workflow" and attributes.get("gen_ai.workflow.name") == "weather_workflow":
+            self.workflow_span_id = span.context.span_id
+        elif (
+            operation_name == "invoke_agent"
+            and span.kind == SpanKind.INTERNAL
+            and attributes.get("gen_ai.agent.name") == "remote_weather_agent"
+        ):
             self.internal_span_id = span.context.span_id
-        elif span.kind == SpanKind.CLIENT and attributes.get("gen_ai.agent.name") == "weather-agent":
+            self.internal_parent_span_id = span.parent.span_id if span.parent else None
+        elif (
+            operation_name == "invoke_agent"
+            and span.kind == SpanKind.CLIENT
+            and attributes.get("gen_ai.agent.name") == "weather-agent"
+        ):
             self.client_parent_span_id = span.parent.span_id if span.parent else None
+            self.client_has_caller_attributes = any(attribute.startswith("gen_ai.caller.") for attribute in attributes)
 
     def assert_valid(self):
+        if self.workflow_span_id is None:
+            raise AssertionError("SequentialAgent workflow span was not recorded")
         if self.internal_span_id is None:
             raise AssertionError("RemoteA2aAgent INTERNAL span was not recorded")
+        if self.internal_parent_span_id != self.workflow_span_id:
+            raise AssertionError("RemoteA2aAgent INTERNAL span is not a child of the workflow span")
         if self.client_parent_span_id != self.internal_span_id:
             raise AssertionError("A2A CLIENT span is not a child of the RemoteA2aAgent INTERNAL span")
+        if self.client_has_caller_attributes:
+            raise AssertionError("A2A CLIENT span emitted caller attributes before they were added to the model")
 
     def shutdown(self):
         pass
@@ -599,9 +619,10 @@ def run_multi_agent_delegation_reference():
 
 
 def run_remote_a2a_agent_reference(topology_recorder):
-    """Invoke a remote A2A agent from an ADK ``RemoteA2aAgent`` execution."""
+    """Invoke a remote A2A agent from an ADK workflow."""
     from a2a.helpers import get_message_text
     from google.adk.a2a import _compat as adk_a2a_compat
+    from google.adk.agents import SequentialAgent
     from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH, RemoteA2aAgent
     from google.adk.runners import Runner
     from google.adk.sessions import InMemorySessionService
@@ -614,14 +635,37 @@ def run_remote_a2a_agent_reference(topology_recorder):
             name="remote_weather_agent",
             agent_card=f"{server_url}{AGENT_CARD_WELL_KNOWN_PATH}",
         )
+        workflow = SequentialAgent(
+            name="weather_workflow",
+            description="Invokes the remote weather agent.",
+            sub_agents=[remote_agent],
+        )
         session_service = InMemorySessionService()
-        runner = Runner(agent=remote_agent, app_name="a2a_app", session_service=session_service)
+        runner = Runner(agent=workflow, app_name="a2a_app", session_service=session_service)
         original_send_message = adk_a2a_compat.send_message
+        original_remote_run = remote_agent._run_async_impl
 
         async def _traced_send_message(client, *, request, request_metadata=None, context=None):
             agent_card = remote_agent._agent_card
             if agent_card is None:
                 raise RuntimeError("RemoteA2aAgent did not resolve its Agent Card")
+            caller = remote_agent.parent_agent
+            if not isinstance(caller, SequentialAgent):
+                raise AssertionError("RemoteA2aAgent parent is not an ADK workflow agent")
+            if caller.name != workflow.name:
+                raise AssertionError("RemoteA2aAgent did not retain its parent workflow")
+            # Keep these proposed attributes local until the caller refinement
+            # is added to the model. This assertion proves both values are
+            # available to instrumentation at the A2A client call boundary.
+            proposed_caller_attributes = {
+                "gen_ai.caller.type": "workflow",
+                "gen_ai.caller.name": caller.name,
+            }
+            assert caller.name == workflow.name
+            assert proposed_caller_attributes == {
+                "gen_ai.caller.type": "workflow",
+                "gen_ai.caller.name": "weather_workflow",
+            }
             target_url = urlparse(agent_card.supported_interfaces[0].url)
             client_attributes = {
                 "gen_ai.operation.name": "invoke_agent",
@@ -653,21 +697,35 @@ def run_remote_a2a_agent_reference(topology_recorder):
                 ):
                     yield response
 
-        async def _invoke():
-            session = await session_service.create_session(app_name="a2a_app", user_id="test_user")
-            input_text = "What's the weather in Seattle?"
-            input_message = types.Content(role="user", parts=[types.Part(text=input_text)])
-            parent_attributes = {
+        async def _traced_remote_run(context):
+            agent_attributes = {
                 "gen_ai.operation.name": "invoke_agent",
                 "gen_ai.agent.name": remote_agent.name,
             }
             with _reference_tracer.start_as_current_span(
                 f"invoke_agent {remote_agent.name}",
                 kind=SpanKind.INTERNAL,
-                attributes=parent_attributes,
-            ) as parent_span:
-                parent_span.set_attribute("gen_ai.conversation.id", session.id)
-                parent_span.set_attribute(
+                attributes=agent_attributes,
+            ) as agent_span:
+                agent_span.set_attribute("gen_ai.conversation.id", context.session.id)
+                async for event in original_remote_run(context):
+                    yield event
+
+        async def _invoke():
+            session = await session_service.create_session(app_name="a2a_app", user_id="test_user")
+            input_text = "What's the weather in Seattle?"
+            input_message = types.Content(role="user", parts=[types.Part(text=input_text)])
+            workflow_attributes = {
+                "gen_ai.operation.name": "invoke_workflow",
+                "gen_ai.workflow.name": workflow.name,
+            }
+            with _reference_tracer.start_as_current_span(
+                f"invoke_workflow {workflow.name}",
+                kind=SpanKind.INTERNAL,
+                attributes=workflow_attributes,
+            ) as workflow_span:
+                workflow_span.set_attribute("gen_ai.conversation.id", session.id)
+                workflow_span.set_attribute(
                     "gen_ai.input.messages",
                     json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}]),
                 )
@@ -682,7 +740,7 @@ def run_remote_a2a_agent_reference(topology_recorder):
                         if text:
                             last_text = text
                 if last_text:
-                    parent_span.set_attribute(
+                    workflow_span.set_attribute(
                         "gen_ai.output.messages",
                         json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": last_text}]}]),
                     )
@@ -694,7 +752,10 @@ def run_remote_a2a_agent_reference(topology_recorder):
             finally:
                 await remote_agent.cleanup()
 
-        with _patched_method(adk_a2a_compat, "send_message", _traced_send_message):
+        with (
+            _patched_method(remote_agent, "_run_async_impl", _traced_remote_run),
+            _patched_method(adk_a2a_compat, "send_message", _traced_send_message),
+        ):
             asyncio.run(_run())
         topology_recorder.assert_valid()
 

@@ -102,9 +102,7 @@ def test_transfer_examples_use_target_qualified_names_when_available():
     assert "`execute_tool transfer_to_weather_agent weather_agent`" in agent_spans
     assert "`execute_tool transfer_to_weather_agent weather_agent`" in interaction_examples
     assert "`execute_tool transfer_to_weather_agent`" in interaction_examples
-    assert (
-        "[tool-based transfer refinement](../gen-ai-agent-spans.md#tool-based-transfer)" in interaction_examples
-    )
+    assert "[tool-based transfer refinement](../gen-ai-agent-spans.md#tool-based-transfer)" in interaction_examples
 
 
 def test_committed_metrics_do_not_include_transfer_attributes():
@@ -168,6 +166,22 @@ def test_committed_google_adk_remote_agent_covers_internal_and_client_spans():
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in invoke_agent_client)
 
 
+def test_google_adk_remote_agent_runs_under_a_named_workflow():
+    path = Path(__file__).parents[1] / "scenarios" / "google-adk" / "scenario.py"
+    scenario = path.read_text(encoding="utf-8")
+
+    assert "SequentialAgent(" in scenario
+    assert 'name="weather_workflow"' in scenario
+    assert "sub_agents=[remote_agent]" in scenario
+    assert "caller = remote_agent.parent_agent" in scenario
+    assert "isinstance(caller, SequentialAgent)" in scenario
+    assert "caller.name == workflow.name" in scenario
+    assert '"gen_ai.caller.type": "workflow"' in scenario
+    assert '"gen_ai.caller.name": caller.name' in scenario
+    assert 'attribute.startswith("gen_ai.caller.")' in scenario
+    assert 'f"invoke_workflow {workflow.name}"' in scenario
+
+
 def test_committed_transfer_scenarios_emit_transfer_attributes():
     scenarios_dir = Path(__file__).parents[1] / "scenarios"
 
@@ -209,6 +223,7 @@ if __name__ == "__main__":
     test_span_specs_are_named_as_the_registry_names_them()
     test_invoke_agent_client_does_not_duplicate_transfer_target()
     test_committed_google_adk_remote_agent_covers_internal_and_client_spans()
+    test_google_adk_remote_agent_runs_under_a_named_workflow()
     test_committed_transfer_scenarios_emit_transfer_attributes()
     test_interaction_type_is_removed_from_committed_scenarios()
     print("ok")

@@ -5,10 +5,11 @@ through its model layer (e.g. `google-genai`), so it **delegates inference**. It
 owns the agent, workflow, tool, memory, and remote-agent operations it runs
 directly.
 
-The `RemoteA2aAgent` scenario records its local ADK execution as an
-`invoke_agent` INTERNAL span and the A2A request as its `invoke_agent` CLIENT
-child. The scenario checks that relationship using the recorded span IDs. ADK
-currently marks its A2A integration as experimental.
+The `RemoteA2aAgent` scenario runs the remote agent under a named
+`SequentialAgent` workflow. It records the workflow, the local remote-agent
+execution, and the A2A CLIENT request as nested spans. The scenario also verifies
+that the remote agent retains its parent workflow as library state at the A2A
+call boundary. ADK currently marks its A2A integration as experimental.
 
 | Operation | Should be instrumented here | Status |
 | --- | --- | --- |
