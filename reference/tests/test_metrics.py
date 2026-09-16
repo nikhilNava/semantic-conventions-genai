@@ -22,6 +22,11 @@ _TRANSFER_ATTRIBUTES = {
     "gen_ai.transfer.mode",
     "gen_ai.transfer.target.name",
 }
+_TRANSFER_TARGET_TYPE = "gen_ai.transfer.target.type"
+
+
+def _attribute_block(model_block: str, attribute: str) -> str:
+    return model_block.split(f"- ref: {attribute}", 1)[1].split("\n      - ref:", 1)[0]
 
 
 def test_metric_specs_expose_recommended_agent_name():
@@ -67,13 +72,13 @@ def test_execute_tool_transfer_is_a_span_refinement():
 
     for attribute in (
         "gen_ai.transfer.mode",
-        "gen_ai.transfer.target.type",
+        _TRANSFER_TARGET_TYPE,
         "gen_ai.transfer.target.name",
     ):
         assert f"- ref: {attribute}" in execute_tool
         assert f"- ref: {attribute}" in transfer
-
-    assert "sampling_relevant: true" not in transfer
+        assert "sampling_relevant" not in _attribute_block(execute_tool, attribute)
+        assert "sampling_relevant" not in _attribute_block(transfer, attribute)
 
 
 def test_transfer_examples_use_target_qualified_names_when_available():
@@ -92,10 +97,14 @@ def test_transfer_examples_use_target_qualified_names_when_available():
     assert 'f"execute_tool {agent_tool.name} {specialist.name}"' in google_adk
     assert 'f"execute_tool {weather_tool.name} {specialist.name}"' in openai_agents
     assert '"execute_tool transfer_to_weather_agent"' in langchain
+    assert "gen_ai.transfer.target.type" not in langchain
     assert "[tool-based transfer refinement](gen-ai-agent-spans.md#tool-based-transfer)" in base_spans
     assert "`execute_tool transfer_to_weather_agent weather_agent`" in agent_spans
     assert "`execute_tool transfer_to_weather_agent weather_agent`" in interaction_examples
     assert "`execute_tool transfer_to_weather_agent`" in interaction_examples
+    assert (
+        "[tool-based transfer refinement](../gen-ai-agent-spans.md#tool-based-transfer)" in interaction_examples
+    )
 
 
 def test_committed_metrics_do_not_include_transfer_attributes():
@@ -162,13 +171,19 @@ def test_committed_google_adk_remote_agent_covers_internal_and_client_spans():
 def test_committed_transfer_scenarios_emit_transfer_attributes():
     scenarios_dir = Path(__file__).parents[1] / "scenarios"
 
-    for library in ("google-adk", "langchain", "openai-agents"):
+    expected_attributes = {
+        "google-adk": _TRANSFER_ATTRIBUTES | {_TRANSFER_TARGET_TYPE},
+        "langchain": _TRANSFER_ATTRIBUTES,
+        "openai-agents": _TRANSFER_ATTRIBUTES | {_TRANSFER_TARGET_TYPE},
+    }
+
+    for library, expected in expected_attributes.items():
         data = json.loads((scenarios_dir / library / "data.json").read_text(encoding="utf-8"))
         execute_tool = data["spans"]["gen_ai.execute_tool.internal"]
 
-        for attribute in _TRANSFER_ATTRIBUTES:
+        for attribute in expected:
             assert attribute in execute_tool, (library, attribute)
-        assert "gen_ai.transfer.target.type" in execute_tool, library
+        assert (_TRANSFER_TARGET_TYPE in execute_tool) is (_TRANSFER_TARGET_TYPE in expected), library
 
         invoke_agent_internal = data["spans"].get("gen_ai.invoke_agent.internal", [])
         assert not any(attribute.startswith("gen_ai.transfer.") for attribute in invoke_agent_internal), library

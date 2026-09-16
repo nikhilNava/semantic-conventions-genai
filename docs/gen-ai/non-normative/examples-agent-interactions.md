@@ -6,8 +6,9 @@ interactions. These examples are non-normative.
 ## Tool-based transfer
 
 Some frameworks expose another agent as a tool. The framework records the tool
-execution using the `gen_ai.execute_tool.transfer.internal` refinement of the
-generic `gen_ai.execute_tool.internal` span:
+execution using the `gen_ai.execute_tool.transfer.internal`
+[tool-based transfer refinement](../gen-ai-agent-spans.md#tool-based-transfer)
+of the generic `gen_ai.execute_tool.internal` span:
 
 - `gen_ai.agent.*` identifies the source agent executing the tool.
 - `gen_ai.transfer.target.*` identifies the target agent.
