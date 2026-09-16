@@ -9,7 +9,8 @@ The `RemoteA2aAgent` scenario runs the remote agent under a named
 `SequentialAgent` workflow. It records the workflow, the local remote-agent
 execution, and the A2A CLIENT request as nested spans. The scenario also verifies
 that the remote agent retains its parent workflow as library state at the A2A
-call boundary. ADK currently marks its A2A integration as experimental.
+call boundary and records that workflow as the CLIENT span's immediate logical
+caller. ADK currently marks its A2A integration as experimental.
 
 | Operation | Should be instrumented here | Status |
 | --- | --- | --- |

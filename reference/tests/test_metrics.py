@@ -23,6 +23,10 @@ _TRANSFER_ATTRIBUTES = {
     "gen_ai.transfer.target.name",
 }
 _TRANSFER_TARGET_TYPE = "gen_ai.transfer.target.type"
+_CALLER_ATTRIBUTES = {
+    "gen_ai.caller.type",
+    "gen_ai.caller.name",
+}
 
 
 def _attribute_block(model_block: str, attribute: str) -> str:
@@ -105,6 +109,22 @@ def test_transfer_examples_use_target_qualified_names_when_available():
     assert "[tool-based transfer refinement](../gen-ai-agent-spans.md#tool-based-transfer)" in interaction_examples
 
 
+def test_caller_refinement_is_documented_with_workflow_example():
+    repository_root = Path(__file__).parents[2]
+    agent_spans = (repository_root / "docs" / "gen-ai" / "gen-ai-agent-spans.md").read_text(encoding="utf-8")
+    interaction_examples = (
+        repository_root / "docs" / "gen-ai" / "non-normative" / "examples-agent-interactions.md"
+    ).read_text(encoding="utf-8")
+
+    assert 'select(.id == "gen_ai.invoke_agent.caller.client")' in agent_spans
+    assert "### Caller-aware remote invocation" in agent_spans
+    assert "[`invoke_agent` caller refinement](#caller-aware-remote-invocation)" in agent_spans
+    assert "`gen_ai.caller.type`" in interaction_examples
+    assert "`gen_ai.caller.name`" in interaction_examples
+    assert "weather_workflow" in interaction_examples
+    assert "gen_ai.transfer.*` is not recorded" in interaction_examples
+
+
 def test_committed_metrics_do_not_include_transfer_attributes():
     for path in (Path(__file__).parents[1] / "scenarios").glob("*/data.json"):
         metrics = json.loads(path.read_text(encoding="utf-8")).get("metrics", {})
@@ -154,6 +174,36 @@ def test_invoke_agent_client_does_not_duplicate_transfer_target():
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in attributes)
 
 
+def test_invoke_agent_caller_is_a_span_refinement():
+    repository_root = Path(__file__).parents[2]
+    registry_model = (repository_root / "model" / "gen-ai" / "registry.yaml").read_text(encoding="utf-8")
+    spans_model = (repository_root / "model" / "gen-ai" / "spans.yaml").read_text(encoding="utf-8")
+    spans, refinements = spans_model.split("span_refinements:", 1)
+    invoke_agent_client = spans.split("- type: gen_ai.invoke_agent.client", 1)[1].split(
+        "- type: gen_ai.invoke_agent.internal", 1
+    )[0]
+    caller = refinements.split("- id: gen_ai.invoke_agent.caller.client", 1)[1].split(
+        "\n  - id:", 1
+    )[0]
+
+    assert "- key: gen_ai.caller.type" in registry_model
+    assert 'value: "agent"' in registry_model
+    assert 'value: "workflow"' in registry_model
+    assert "- key: gen_ai.caller.name" in registry_model
+
+    assert "ref: gen_ai.invoke_agent.client" in caller
+    assert "does not produce an additional span" in caller
+    assert "even when the invocation fails" in caller
+    assert "MUST NOT infer" in caller
+    assert "- ref: gen_ai.transfer." not in caller
+
+    for attribute in _CALLER_ATTRIBUTES:
+        assert f"- ref: {attribute}" in invoke_agent_client
+        assert f"- ref: {attribute}" in caller
+        assert "sampling_relevant: true" in _attribute_block(invoke_agent_client, attribute)
+        assert "sampling_relevant: true" in _attribute_block(caller, attribute)
+
+
 def test_committed_google_adk_remote_agent_covers_internal_and_client_spans():
     path = Path(__file__).parents[1] / "scenarios" / "google-adk" / "data.json"
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -163,6 +213,7 @@ def test_committed_google_adk_remote_agent_covers_internal_and_client_spans():
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in invoke_agent_internal)
     assert "gen_ai.agent.name" in invoke_agent_client
     assert "gen_ai.provider.name" in invoke_agent_client
+    assert set(invoke_agent_client) >= _CALLER_ATTRIBUTES
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in invoke_agent_client)
 
 
@@ -175,10 +226,14 @@ def test_google_adk_remote_agent_runs_under_a_named_workflow():
     assert "sub_agents=[remote_agent]" in scenario
     assert "caller = remote_agent.parent_agent" in scenario
     assert "isinstance(caller, SequentialAgent)" in scenario
-    assert "caller.name == workflow.name" in scenario
+    assert "caller.name != workflow.name" in scenario
     assert '"gen_ai.caller.type": "workflow"' in scenario
     assert '"gen_ai.caller.name": caller.name' in scenario
-    assert 'attribute.startswith("gen_ai.caller.")' in scenario
+    assert 'attributes.get("gen_ai.caller.type")' in scenario
+    assert 'attributes.get("gen_ai.caller.name")' in scenario
+    assert 'self.client_caller_type != "workflow"' in scenario
+    assert 'self.client_caller_name != "weather_workflow"' in scenario
+    assert 'attribute.startswith("gen_ai.caller.")' not in scenario
     assert 'f"invoke_workflow {workflow.name}"' in scenario
 
 
@@ -215,6 +270,7 @@ if __name__ == "__main__":
     test_execute_tool_duration_does_not_include_transfer_attributes()
     test_execute_tool_transfer_is_a_span_refinement()
     test_transfer_examples_use_target_qualified_names_when_available()
+    test_caller_refinement_is_documented_with_workflow_example()
     test_committed_metrics_do_not_include_transfer_attributes()
     test_committed_google_adk_metrics_round_trip()
     test_registry_span_names_map_onto_report_keys()
@@ -222,6 +278,7 @@ if __name__ == "__main__":
     test_span_types_absent_from_a_data_file_are_not_reported()
     test_span_specs_are_named_as_the_registry_names_them()
     test_invoke_agent_client_does_not_duplicate_transfer_target()
+    test_invoke_agent_caller_is_a_span_refinement()
     test_committed_google_adk_remote_agent_covers_internal_and_client_spans()
     test_google_adk_remote_agent_runs_under_a_named_workflow()
     test_committed_transfer_scenarios_emit_transfer_attributes()

@@ -516,6 +516,11 @@ spans:
       The `gen_ai.operation.name` SHOULD be `invoke_agent`.
 
       Examples: OpenAI Assistants API, AWS Bedrock Agents.
+
+      When the instrumented library or protocol explicitly exposes the
+      immediate logical caller as an agent or workflow, instrumentations SHOULD
+      record the applicable refinement. They SHOULD NOT record two different
+      spans for one invocation.
     stability: development
     attributes:
       - ref_group: attributes.gen_ai.invoke_agent.common
@@ -545,6 +550,14 @@ spans:
         brief: The version of the invoked GenAI agent.
         requirement_level:
           conditionally_required: When available.
+      - ref: gen_ai.caller.type
+        requirement_level:
+          conditionally_required: When the immediate logical caller is explicitly exposed by the instrumented library or protocol.
+        sampling_relevant: true
+      - ref: gen_ai.caller.name
+        requirement_level:
+          conditionally_required: When `gen_ai.caller.type` is present and the caller name is available.
+        sampling_relevant: true
 
   - type: gen_ai.invoke_agent.internal
     requirement_level: recommended
@@ -879,6 +892,43 @@ span_refinements:
         requirement_level: required
       - ref: aws.bedrock.knowledge_base.id
         requirement_level: recommended
+
+  - id: gen_ai.invoke_agent.caller.client
+    ref: gen_ai.invoke_agent.client
+    brief: >
+      Describes a remote GenAI agent invocation with an explicitly exposed
+      agent or workflow caller.
+    note: |
+      This refinement applies when the instrumented library or protocol
+      explicitly exposes the immediate logical caller as an agent or workflow.
+
+      `gen_ai.agent.*` identifies the invoked remote agent.
+      `gen_ai.caller.*` identifies the immediate logical caller that initiated
+      the invocation.
+
+      `gen_ai.caller.type` MUST be recorded even when the invocation fails.
+      `gen_ai.caller.name` MUST also be recorded when it is available.
+
+      Applying this refinement changes the semantic contract of the existing
+      invoke-agent CLIENT span and does not produce an additional span.
+
+      Instrumentations MUST NOT infer caller identity from span hierarchy,
+      span names, timing, or application-specific conventions.
+
+      When caller identity is unavailable, instrumentations use the base
+      `gen_ai.invoke_agent.client` span contract.
+
+      The presence of caller identity does not imply a transfer of control, so
+      `gen_ai.transfer.*` is not recorded on this span.
+    stability: development
+    attributes:
+      - ref: gen_ai.caller.type
+        requirement_level: required
+        sampling_relevant: true
+      - ref: gen_ai.caller.name
+        requirement_level:
+          conditionally_required: When the caller name is available.
+        sampling_relevant: true
 
   - id: gen_ai.execute_tool.transfer.internal
     ref: gen_ai.execute_tool.internal

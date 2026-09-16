@@ -54,13 +54,27 @@ For a transfer that does not return control to the source agent, the
 ## Agent invocation through an API or protocol
 
 When an agent invokes another agent through an API or protocol, use the existing
-`invoke_agent` CLIENT span. `gen_ai.agent.*` identifies the invoked agent;
-`gen_ai.transfer.*` is not recorded.
+`invoke_agent` CLIENT span. `gen_ai.agent.*` identifies the invoked agent.
+When the library explicitly exposes the immediate logical caller, use the
+caller-aware refinement:
+
+- `gen_ai.caller.type` identifies whether that caller is an agent or workflow.
+- `gen_ai.caller.name` identifies the immediate logical caller.
+
+`gen_ai.transfer.*` is not recorded because remote invocation does not by
+itself imply a transfer of control.
 
 For example, Google ADK's `RemoteA2aAgent` can discover a remote agent from its
-Agent Card and invoke it with the A2A protocol's `SendMessage` operation.
+Agent Card and invoke it with the A2A protocol's `SendMessage` operation. When
+the `RemoteA2aAgent` belongs to a `SequentialAgent` named `weather_workflow`,
+ADK exposes that workflow through the remote agent's `parent_agent` state at
+the A2A call boundary. The CLIENT span can therefore record the workflow as its
+logical caller.
+
 The local `RemoteA2aAgent` execution is an `invoke_agent` INTERNAL span, and the
-protocol request is its `invoke_agent` CLIENT child.
+protocol request is its `invoke_agent` CLIENT child. The caller attributes
+describe the logical workflow caller rather than duplicating the immediate
+parent span.
 
 The target process can independently record the agent's execution as an
 `invoke_agent` INTERNAL span. When trace context is propagated, that execution
@@ -69,14 +83,16 @@ can be a descendant of the CLIENT span.
 ```mermaid
 flowchart LR
   subgraph C["CALLER PROCESS"]
-    C1["invoke_agent source [INTERNAL]"]
-    C2["invoke_agent target [CLIENT]<br/>agent.name = target"]
+    C1["invoke_workflow weather_workflow [INTERNAL]<br/>workflow.name = weather_workflow"]
+    C2["invoke_agent remote_weather_agent [INTERNAL]<br/>agent.name = remote_weather_agent"]
+    C3["invoke_agent weather-agent [CLIENT]<br/>agent.name = weather-agent<br/>caller.type = workflow<br/>caller.name = weather_workflow"]
     C1 --> C2
+    C2 --> C3
   end
   subgraph T["TARGET PROCESS"]
-    T1["invoke_agent target [INTERNAL]"]
+    T1["invoke_agent weather-agent [INTERNAL]"]
   end
-  C2 --> T1
+  C3 --> T1
 ```
 
 These conventions do not require the target execution span or prescribe a

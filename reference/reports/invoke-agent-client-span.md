@@ -17,6 +17,8 @@
 | gen_ai.agent.id | [aws-bedrock-agent], [openai-assistants] |
 | gen_ai.agent.name | [azure-ai-foundry], [google-adk], [google-genai], [openai-assistants] |
 | gen_ai.agent.version | [aws-bedrock-agent] |
+| gen_ai.caller.name | [google-adk] |
+| gen_ai.caller.type | [google-adk] |
 | gen_ai.conversation.id | [aws-bedrock-agent], [openai-assistants] |
 | gen_ai.data_source.id | (none) |
 | gen_ai.output.type | [azure-ai-foundry] |

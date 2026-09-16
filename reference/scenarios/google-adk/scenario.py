@@ -83,7 +83,8 @@ class A2ATopologyRecorder(SpanProcessor):
         self.internal_span_id = None
         self.internal_parent_span_id = None
         self.client_parent_span_id = None
-        self.client_has_caller_attributes = None
+        self.client_caller_type = None
+        self.client_caller_name = None
 
     def on_start(self, span, parent_context=None):
         pass
@@ -106,7 +107,8 @@ class A2ATopologyRecorder(SpanProcessor):
             and attributes.get("gen_ai.agent.name") == "weather-agent"
         ):
             self.client_parent_span_id = span.parent.span_id if span.parent else None
-            self.client_has_caller_attributes = any(attribute.startswith("gen_ai.caller.") for attribute in attributes)
+            self.client_caller_type = attributes.get("gen_ai.caller.type")
+            self.client_caller_name = attributes.get("gen_ai.caller.name")
 
     def assert_valid(self):
         if self.workflow_span_id is None:
@@ -117,8 +119,10 @@ class A2ATopologyRecorder(SpanProcessor):
             raise AssertionError("RemoteA2aAgent INTERNAL span is not a child of the workflow span")
         if self.client_parent_span_id != self.internal_span_id:
             raise AssertionError("A2A CLIENT span is not a child of the RemoteA2aAgent INTERNAL span")
-        if self.client_has_caller_attributes:
-            raise AssertionError("A2A CLIENT span emitted caller attributes before they were added to the model")
+        if self.client_caller_type != "workflow":
+            raise AssertionError("A2A CLIENT span did not identify its workflow caller type")
+        if self.client_caller_name != "weather_workflow":
+            raise AssertionError("A2A CLIENT span did not identify its workflow caller name")
 
     def shutdown(self):
         pass
@@ -654,22 +658,12 @@ def run_remote_a2a_agent_reference(topology_recorder):
                 raise AssertionError("RemoteA2aAgent parent is not an ADK workflow agent")
             if caller.name != workflow.name:
                 raise AssertionError("RemoteA2aAgent did not retain its parent workflow")
-            # Keep these proposed attributes local until the caller refinement
-            # is added to the model. This assertion proves both values are
-            # available to instrumentation at the A2A client call boundary.
-            proposed_caller_attributes = {
-                "gen_ai.caller.type": "workflow",
-                "gen_ai.caller.name": caller.name,
-            }
-            assert caller.name == workflow.name
-            assert proposed_caller_attributes == {
-                "gen_ai.caller.type": "workflow",
-                "gen_ai.caller.name": "weather_workflow",
-            }
             target_url = urlparse(agent_card.supported_interfaces[0].url)
             client_attributes = {
                 "gen_ai.operation.name": "invoke_agent",
                 "gen_ai.agent.name": agent_card.name,
+                "gen_ai.caller.type": "workflow",
+                "gen_ai.caller.name": caller.name,
                 "gen_ai.provider.name": agent_card.provider.organization,
                 "server.address": target_url.hostname or "localhost",
                 "server.port": target_url.port or 443,
