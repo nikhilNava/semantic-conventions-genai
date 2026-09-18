@@ -14,7 +14,11 @@ import json
 from pathlib import Path
 
 from semconv_genai.data_files import _normalize_scenario_data_entry, load_scenario_data_files
-from semconv_genai.semconv_model import metric_specs, span_specs
+from semconv_genai.refinement_coverage import (
+    collect_span_refinement_coverage,
+    update_span_refinement_coverage,
+)
+from semconv_genai.semconv_model import metric_specs, span_refinement_specs, span_specs
 
 _TOOL_CALLS = "gen_ai.invoke_agent.tool_calls"
 _INFERENCE_CALLS = "gen_ai.invoke_agent.inference_calls"
@@ -31,6 +35,18 @@ _CALLER_ATTRIBUTES = {
 
 def _attribute_block(model_block: str, attribute: str) -> str:
     return model_block.split(f"- ref: {attribute}", 1)[1].split("\n      - ref:", 1)[0]
+
+
+def _raw_span(kind: str, attributes: dict[str, object]) -> dict[str, object]:
+    return {
+        "span": {
+            "kind": kind,
+            "attributes": [
+                {"name": name, "value": value}
+                for name, value in attributes.items()
+            ],
+        }
+    }
 
 
 def test_metric_specs_expose_recommended_agent_name():
@@ -168,6 +184,110 @@ def test_span_types_absent_from_a_data_file_are_not_reported():
 def test_span_specs_are_named_as_the_registry_names_them():
     for key, spec in span_specs().items():
         assert spec.registry_id.startswith("gen_ai."), key
+
+
+def test_span_refinement_specs_describe_the_same_physical_base_spans():
+    caller = span_refinement_specs()["invoke_agent_caller_client"]
+    transfer = span_refinement_specs()["execute_tool_transfer"]
+
+    assert caller.registry_id == "gen_ai.invoke_agent.caller.client"
+    assert caller.base_registry_id == "gen_ai.invoke_agent.client"
+    assert caller.operation_name == "invoke_agent"
+    assert caller.span_kind == "client"
+    assert caller.discriminator == "gen_ai.caller.type"
+
+    assert transfer.registry_id == "gen_ai.execute_tool.transfer.internal"
+    assert transfer.base_registry_id == "gen_ai.execute_tool.internal"
+    assert transfer.operation_name == "execute_tool"
+    assert transfer.span_kind == "internal"
+    assert transfer.discriminator == "gen_ai.transfer.mode"
+
+
+def test_collect_span_refinement_coverage_uses_discriminators(tmp_path):
+    report_dir = tmp_path / "weaver-reports"
+    report_dir.mkdir()
+    report = {
+        "samples": [
+            _raw_span(
+                "client",
+                {
+                    "gen_ai.operation.name": "invoke_agent",
+                    "gen_ai.caller.type": "workflow",
+                    "gen_ai.caller.name": "weather_workflow",
+                },
+            ),
+            _raw_span(
+                "internal",
+                {
+                    "gen_ai.operation.name": "execute_tool",
+                    "gen_ai.transfer.mode": "return_to_caller",
+                    "gen_ai.transfer.target.name": "weather_agent",
+                    "gen_ai.transfer.target.type": "agent",
+                },
+            ),
+            _raw_span(
+                "client",
+                {
+                    "gen_ai.operation.name": "invoke_agent",
+                    "gen_ai.agent.name": "no_explicit_caller",
+                },
+            ),
+        ]
+    }
+    (report_dir / "reference.json").write_text(json.dumps(report), encoding="utf-8")
+
+    assert collect_span_refinement_coverage(report_dir) == {
+        "gen_ai.execute_tool.transfer.internal": [
+            "gen_ai.transfer.mode",
+            "gen_ai.transfer.target.name",
+            "gen_ai.transfer.target.type",
+        ],
+        "gen_ai.invoke_agent.caller.client": [
+            "gen_ai.caller.name",
+            "gen_ai.caller.type",
+        ],
+    }
+
+
+def test_update_span_refinement_coverage_preserves_runner_data(tmp_path):
+    scenario_dir = tmp_path / "scenario"
+    report_dir = scenario_dir / "output" / "weaver-reports"
+    report_dir.mkdir(parents=True)
+    original = {
+        "spans": {"gen_ai.invoke_agent.client": ["gen_ai.operation.name"]},
+        "events": {},
+        "metrics": {},
+        "findings": [],
+        "entities": {},
+    }
+    (scenario_dir / "data.json").write_text(
+        json.dumps(original, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    report = {
+        "samples": [
+            _raw_span(
+                "client",
+                {
+                    "gen_ai.operation.name": "invoke_agent",
+                    "gen_ai.caller.type": "workflow",
+                    "gen_ai.caller.name": "weather_workflow",
+                },
+            )
+        ]
+    }
+    (report_dir / "reference.json").write_text(json.dumps(report), encoding="utf-8")
+
+    update_span_refinement_coverage(scenario_dir)
+
+    updated = json.loads((scenario_dir / "data.json").read_text(encoding="utf-8"))
+    assert updated["spans"] == original["spans"]
+    assert updated["span_refinements"] == {
+        "gen_ai.invoke_agent.caller.client": [
+            "gen_ai.caller.name",
+            "gen_ai.caller.type",
+        ]
+    }
 
 
 def test_invoke_agent_client_does_not_duplicate_transfer_target():
