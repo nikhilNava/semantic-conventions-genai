@@ -44,8 +44,8 @@ EVENT_TYPE_ORDER = [
 
 # Display order for span refinements in reports.
 SPAN_REFINEMENT_ORDER = [
-    "invoke_agent_caller_client",
     "execute_tool_transfer",
+    "invoke_agent_caller_client",
 ]
 
 

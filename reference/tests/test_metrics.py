@@ -192,12 +192,16 @@ def test_committed_refinement_reports_preserve_reference_coverage():
     reports = Path(__file__).parents[1] / "reports"
     caller = (reports / "invoke-agent-caller-client-span-refinement.md").read_text(encoding="utf-8")
     transfer = (reports / "execute-tool-transfer-span-refinement.md").read_text(encoding="utf-8")
+    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
 
     assert "| gen_ai.caller.type | [google-adk] |" in caller
     assert "| gen_ai.caller.name | [google-adk] |" in caller
     assert "| gen_ai.transfer.mode | [google-adk], [langchain], [openai-agents] |" in transfer
     assert "| gen_ai.transfer.target.name | [google-adk], [langchain], [openai-agents] |" in transfer
     assert "| gen_ai.transfer.target.type | [google-adk], [openai-agents] |" in transfer
+    assert readme.index("[Execute Tool Transfer](reports/execute-tool-transfer-span-refinement.md)") < readme.index(
+        "[Invoke Agent Caller](reports/invoke-agent-caller-client-span-refinement.md)"
+    )
 
 
 def test_committed_metrics_do_not_include_transfer_attributes():
@@ -481,7 +485,7 @@ def test_committed_transfer_scenarios_emit_transfer_attributes():
 
     for library, expected in expected_attributes.items():
         data = json.loads((scenarios_dir / library / "data.json").read_text(encoding="utf-8"))
-        execute_tool = data["spans"]["gen_ai.execute_tool.internal"]
+        execute_tool = data["spans"].get("gen_ai.execute_tool.internal", [])
         transfer_refinement = data["span_refinements"]["gen_ai.execute_tool.transfer.internal"]
 
         for attribute in expected:
