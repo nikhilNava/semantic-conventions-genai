@@ -153,6 +153,19 @@ def test_caller_refinement_is_documented_with_workflow_example():
     )
 
 
+def test_agent_interaction_refinements_share_a_top_level_section():
+    repository_root = Path(__file__).parents[2]
+    agent_spans = (repository_root / "docs" / "gen-ai" / "gen-ai-agent-spans.md").read_text(encoding="utf-8")
+
+    interactions = agent_spans.index("## Agent-to-agent interactions")
+    caller = agent_spans.index("### Caller-aware remote invocation")
+    transfer = agent_spans.index("### Tool-based transfer")
+
+    assert interactions < caller < transfer
+    assert "    - [Caller-aware remote invocation](#caller-aware-remote-invocation)" in agent_spans
+    assert "    - [Tool-based transfer](#tool-based-transfer)" in agent_spans
+
+
 def test_generated_base_span_docs_exclude_refinement_only_attributes():
     repository_root = Path(__file__).parents[2]
     agent_spans = (repository_root / "docs" / "gen-ai" / "gen-ai-agent-spans.md").read_text(encoding="utf-8")
@@ -512,6 +525,7 @@ if __name__ == "__main__":
     test_execute_tool_transfer_is_a_span_refinement()
     test_transfer_examples_use_target_qualified_names_when_available()
     test_caller_refinement_is_documented_with_workflow_example()
+    test_agent_interaction_refinements_share_a_top_level_section()
     test_generated_base_span_docs_exclude_refinement_only_attributes()
     test_committed_refinement_reports_preserve_reference_coverage()
     test_committed_metrics_do_not_include_transfer_attributes()
