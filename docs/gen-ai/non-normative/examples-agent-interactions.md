@@ -61,9 +61,6 @@ When the library explicitly exposes the immediate logical caller, use the
 - `gen_ai.caller.type` identifies whether that caller is an agent or workflow.
 - `gen_ai.caller.name` identifies the immediate logical caller.
 
-`gen_ai.transfer.*` is not recorded because remote invocation does not by
-itself imply a transfer of control.
-
 For example, Google ADK's `RemoteA2aAgent` can discover a remote agent from its
 Agent Card and invoke it with the A2A protocol's `SendMessage` operation. When
 the `RemoteA2aAgent` belongs to a `SequentialAgent` named `weather_workflow`,

@@ -550,14 +550,6 @@ spans:
         brief: The version of the invoked GenAI agent.
         requirement_level:
           conditionally_required: When available.
-      - ref: gen_ai.caller.type
-        requirement_level:
-          conditionally_required: When the immediate logical caller is explicitly exposed by the instrumented library or protocol.
-        sampling_relevant: true
-      - ref: gen_ai.caller.name
-        requirement_level:
-          conditionally_required: When `gen_ai.caller.type` is present and the caller name is available.
-        sampling_relevant: true
 
   - type: gen_ai.invoke_agent.internal
     requirement_level: recommended
@@ -625,15 +617,6 @@ spans:
         sampling_relevant: true
       - ref: gen_ai.agent.name
         sampling_relevant: true
-      - ref: gen_ai.transfer.mode
-        requirement_level:
-          conditionally_required: When the instrumented framework or protocol explicitly exposes the tool call as a transfer.
-      - ref: gen_ai.transfer.target.type
-        requirement_level:
-          conditionally_required: When `gen_ai.transfer.mode` is present and the target type is known.
-      - ref: gen_ai.transfer.target.name
-        requirement_level:
-          conditionally_required: When `gen_ai.transfer.mode` is present and the target name is available.
       - ref: gen_ai.conversation.id
         requirement_level:
           conditionally_required: If available.
