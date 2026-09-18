@@ -6,7 +6,6 @@ __pycache__/
 .pytest_cache/
 .lycheecache
 .coverage
-.worktrees/
 
 # Reference scenario live output and per-scenario uv cache
 reference/.cache/
