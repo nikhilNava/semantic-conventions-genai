@@ -79,6 +79,7 @@ def test_execute_tool_transfer_is_a_span_refinement():
         _TRANSFER_TARGET_TYPE,
         "gen_ai.transfer.target.name",
     ):
+        assert f"- ref: {attribute}" not in execute_tool
         assert f"- ref: {attribute}" in transfer
         assert "sampling_relevant" not in _attribute_block(transfer, attribute)
 
@@ -119,6 +120,7 @@ def test_caller_refinement_is_documented_with_workflow_example():
     assert "[`invoke_agent` caller refinement](#caller-aware-remote-invocation)" in agent_spans
     assert "`gen_ai.caller.type`" in interaction_examples
     assert "`gen_ai.caller.name`" in interaction_examples
+    assert "gen_ai.transfer.*` is not recorded because remote invocation" not in interaction_examples
     assert "weather_workflow" in interaction_examples
     assert (
         "[caller-aware refinement](../gen-ai-agent-spans.md#caller-aware-remote-invocation)" in interaction_examples
