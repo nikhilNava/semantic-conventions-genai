@@ -13,11 +13,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from semconv_genai.data_files import _normalize_scenario_data_entry, load_scenario_data_files
+from semconv_genai.data_files import (
+    _normalize_scenario_data_entry,
+    load_scenario_data_files,
+)
 from semconv_genai.refinement_coverage import (
     collect_span_refinement_coverage,
     update_span_refinement_coverage,
 )
+from semconv_genai.report import _render_signal_section
 from semconv_genai.semconv_model import metric_specs, span_refinement_specs, span_specs
 
 _TOOL_CALLS = "gen_ai.invoke_agent.tool_calls"
@@ -179,6 +183,59 @@ def test_events_keep_their_registry_names():
 def test_span_types_absent_from_a_data_file_are_not_reported():
     entry = _normalize_scenario_data_entry({"spans": {}}, "fake")
     assert entry.spans == {}
+
+
+def test_refinement_data_normalizes_against_refinement_specs():
+    entry = _normalize_scenario_data_entry(
+        {
+            "span_refinements": {
+                "gen_ai.invoke_agent.caller.client": [
+                    "gen_ai.caller.name",
+                    "gen_ai.caller.type",
+                ]
+            }
+        },
+        "google-adk",
+    )
+
+    assert entry.span_refinements["invoke_agent_caller_client"] == {
+        "gen_ai.caller.name": "present",
+        "gen_ai.caller.type": "present",
+    }
+
+
+def test_generated_refinement_reports_keep_base_and_refinement_coverage_separate(tmp_path):
+    entry = _normalize_scenario_data_entry(
+        {
+            "spans": {
+                "gen_ai.invoke_agent.client": [
+                    "gen_ai.operation.name",
+                    "gen_ai.provider.name",
+                ]
+            },
+            "span_refinements": {
+                "gen_ai.invoke_agent.caller.client": [
+                    "gen_ai.caller.name",
+                    "gen_ai.caller.type",
+                ]
+            },
+        },
+        "google-adk",
+    )
+
+    page = _render_signal_section(
+        [entry],
+        "invoke_agent_caller_client",
+        span_refinement_specs()["invoke_agent_caller_client"],
+        tmp_path,
+        "Span Refinement",
+        lambda item: item.span_refinements,
+    )
+
+    rendered = "\n".join(page)
+    assert "# Invoke Agent Caller Span Refinement" in rendered
+    assert "| gen_ai.caller.type | [google-adk] |" in rendered
+    assert "gen_ai.operation.name" not in rendered
 
 
 def test_span_specs_are_named_as_the_registry_names_them():
@@ -399,6 +456,9 @@ if __name__ == "__main__":
     test_registry_span_names_map_onto_report_keys()
     test_events_keep_their_registry_names()
     test_span_types_absent_from_a_data_file_are_not_reported()
+    test_refinement_data_normalizes_against_refinement_specs()
+    with TemporaryDirectory() as tmpdir:
+        test_generated_refinement_reports_keep_base_and_refinement_coverage_separate(Path(tmpdir))
     test_span_specs_are_named_as_the_registry_names_them()
     test_span_refinement_specs_describe_the_same_physical_base_spans()
     with TemporaryDirectory() as tmpdir:
