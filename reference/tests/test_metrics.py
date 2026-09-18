@@ -386,6 +386,8 @@ def test_interaction_type_is_removed_from_committed_scenarios():
 
 
 if __name__ == "__main__":
+    from tempfile import TemporaryDirectory
+
     test_metric_specs_expose_recommended_agent_name()
     test_metric_specs_are_named_as_the_registry_names_them()
     test_execute_tool_duration_does_not_include_transfer_attributes()
@@ -398,6 +400,11 @@ if __name__ == "__main__":
     test_events_keep_their_registry_names()
     test_span_types_absent_from_a_data_file_are_not_reported()
     test_span_specs_are_named_as_the_registry_names_them()
+    test_span_refinement_specs_describe_the_same_physical_base_spans()
+    with TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        test_collect_span_refinement_coverage_uses_discriminators(tmp_path)
+        test_update_span_refinement_coverage_preserves_runner_data(tmp_path)
     test_invoke_agent_client_does_not_duplicate_transfer_target()
     test_invoke_agent_caller_is_a_span_refinement()
     test_committed_google_adk_remote_agent_covers_internal_and_client_spans()
