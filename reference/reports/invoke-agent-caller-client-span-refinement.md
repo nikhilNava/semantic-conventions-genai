@@ -6,10 +6,12 @@
 
 | Attribute | Supporting Libraries |
 | --- | --- |
-| gen_ai.caller.type | (none) |
+| gen_ai.caller.type | [google-adk] |
 
 ## Conditionally Required
 
 | Attribute | Supporting Libraries |
 | --- | --- |
-| gen_ai.caller.name | (none) |
+| gen_ai.caller.name | [google-adk] |
+
+[google-adk]: ../scenarios/google-adk/scenario.py
