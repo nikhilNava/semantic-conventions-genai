@@ -38,10 +38,7 @@ def collect_span_refinement_coverage(report_dir: Path) -> dict[str, list[str]]:
             present = set(attr_names(spec)) & attributes.keys()
             collected.setdefault(spec.registry_id, set()).update(present)
 
-    return {
-        registry_id: sorted(attributes)
-        for registry_id, attributes in sorted(collected.items())
-    }
+    return {registry_id: sorted(attributes) for registry_id, attributes in sorted(collected.items())}
 
 
 def update_span_refinement_coverage(scenario_dir: Path) -> None:
@@ -50,7 +47,5 @@ def update_span_refinement_coverage(scenario_dir: Path) -> None:
         raise RuntimeError(f"Missing conformance data file: {data_file}")
 
     data = json.loads(data_file.read_text(encoding="utf-8"))
-    data["span_refinements"] = collect_span_refinement_coverage(
-        scenario_dir / "output" / "weaver-reports"
-    )
+    data["span_refinements"] = collect_span_refinement_coverage(scenario_dir / "output" / "weaver-reports")
     data_file.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

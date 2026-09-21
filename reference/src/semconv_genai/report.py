@@ -256,10 +256,7 @@ def generate_index_markdown(
             spec,
             _span_refinements_of,
         )
-        lines.append(
-            f"| [{spec.label}](reports/{filename}) | "
-            f"{_library_dir_links(supporting)} |"
-        )
+        lines.append(f"| [{spec.label}](reports/{filename}) | {_library_dir_links(supporting)} |")
 
     lines.extend(
         [
