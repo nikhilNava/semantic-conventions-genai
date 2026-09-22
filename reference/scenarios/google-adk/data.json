@@ -12,8 +12,10 @@
       "gen_ai.tool.type"
     ],
     "gen_ai.invoke_agent.client": [
+      "error.type",
       "gen_ai.agent.description",
       "gen_ai.agent.name",
+      "gen_ai.agent.version",
       "gen_ai.input.messages",
       "gen_ai.operation.name",
       "gen_ai.provider.name",
@@ -158,13 +160,6 @@
       "context": {
         "missing_attribute": "gen_ai.usage.output_tokens",
         "operation": "invoke_agent"
-      }
-    },
-    {
-      "id": "error_type_missing_on_error",
-      "message": "Span 'invoke_agent weather-agent' has status.code='error' but is missing 'error.type'; it MUST be set when the operation fails.",
-      "context": {
-        "status_code": "error"
       }
     },
     {

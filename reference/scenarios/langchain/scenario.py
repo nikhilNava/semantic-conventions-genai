@@ -441,7 +441,31 @@ async def run_tool_handoff_reference():
     graph = builder.compile()
 
     input_text = "What's the weather in Seattle?"
-    result = await graph.ainvoke({"messages": [{"role": "user", "content": input_text}]})
+    workflow_name = "agent_handoff"
+    workflow_span_attributes = {
+        "gen_ai.operation.name": "invoke_workflow",
+        "gen_ai.workflow.name": workflow_name,
+    }
+    with _reference_tracer.start_as_current_span(
+        f"invoke_workflow {workflow_name}",
+        attributes=workflow_span_attributes,
+    ) as workflow_span:
+        workflow_span.set_attribute(
+            "gen_ai.input.messages",
+            json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}]),
+        )
+        result = await graph.ainvoke({"messages": [{"role": "user", "content": input_text}]})
+        workflow_span.set_attribute(
+            "gen_ai.output.messages",
+            json.dumps(
+                [
+                    {
+                        "role": "assistant",
+                        "parts": [{"type": "text", "content": result["messages"][-1].text()}],
+                    }
+                ]
+            ),
+        )
     print(f"    -> {result['messages'][-1].text()[:60]}")
 
 

@@ -662,6 +662,7 @@ def run_remote_a2a_agent_reference(topology_recorder):
             client_attributes = {
                 "gen_ai.operation.name": "invoke_agent",
                 "gen_ai.agent.name": agent_card.name,
+                "gen_ai.agent.version": agent_card.version,
                 "gen_ai.caller.type": "workflow",
                 "gen_ai.caller.name": caller.name,
                 "gen_ai.provider.name": agent_card.provider.organization,
@@ -683,13 +684,17 @@ def run_remote_a2a_agent_reference(topology_recorder):
                         "gen_ai.input.messages",
                         json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}]),
                     )
-                async for response in original_send_message(
-                    client,
-                    request=request,
-                    request_metadata=request_metadata,
-                    context=context,
-                ):
-                    yield response
+                try:
+                    async for response in original_send_message(
+                        client,
+                        request=request,
+                        request_metadata=request_metadata,
+                        context=context,
+                    ):
+                        yield response
+                except Exception as error:
+                    client_span.set_attribute("error.type", type(error).__qualname__)
+                    raise
 
         async def _traced_remote_run(context):
             agent_attributes = {

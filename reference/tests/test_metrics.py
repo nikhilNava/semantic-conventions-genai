@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import semconv_genai.run_scenario as run_scenario
 from semconv_genai.data_files import (
     _normalize_scenario_data_entry,
     load_scenario_data_files,
@@ -51,10 +52,7 @@ def _raw_span(kind: str, attributes: dict[str, object]) -> dict[str, object]:
     return {
         "span": {
             "kind": kind,
-            "attributes": [
-                {"name": name, "value": value}
-                for name, value in attributes.items()
-            ],
+            "attributes": [{"name": name, "value": value} for name, value in attributes.items()],
         }
     }
 
@@ -148,9 +146,7 @@ def test_caller_refinement_is_documented_with_workflow_example():
     assert "`gen_ai.caller.name`" in interaction_examples
     assert "gen_ai.transfer.*` is not recorded because remote invocation" not in interaction_examples
     assert "weather_workflow" in interaction_examples
-    assert (
-        "[caller-aware refinement](../gen-ai-agent-spans.md#caller-aware-remote-invocation)" in interaction_examples
-    )
+    assert "[caller-aware refinement](../gen-ai-agent-spans.md#caller-aware-remote-invocation)" in interaction_examples
 
 
 def test_agent_interaction_refinements_share_a_top_level_section():
@@ -376,6 +372,29 @@ def test_collect_span_refinement_coverage_uses_discriminators(tmp_path):
     }
 
 
+def test_collect_span_refinement_coverage_excludes_type_mismatches(tmp_path):
+    report_dir = tmp_path / "weaver-reports-mismatch"
+    report_dir.mkdir()
+    sample = _raw_span(
+        "client",
+        {
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.caller.type": "workflow",
+            "gen_ai.caller.name": "weather_workflow",
+        },
+    )
+    caller_name = next(
+        attribute for attribute in sample["span"]["attributes"] if attribute["name"] == "gen_ai.caller.name"
+    )
+    caller_name["live_check_result"] = {"all_advice": [{"id": "type_mismatch"}]}
+    (report_dir / "reference.json").write_text(
+        json.dumps({"samples": [sample]}),
+        encoding="utf-8",
+    )
+
+    assert collect_span_refinement_coverage(report_dir) == {"gen_ai.invoke_agent.caller.client": ["gen_ai.caller.type"]}
+
+
 def test_update_span_refinement_coverage_preserves_runner_data(tmp_path):
     scenario_dir = tmp_path / "scenario"
     report_dir = scenario_dir / "output" / "weaver-reports"
@@ -417,6 +436,96 @@ def test_update_span_refinement_coverage_preserves_runner_data(tmp_path):
     }
 
 
+def test_runner_output_paths_follow_conformance_flags(tmp_path):
+    scenario_dir = tmp_path / "scenario"
+
+    report_dir, data_file = run_scenario._runner_output_paths(
+        scenario_dir,
+        [
+            "--report-dir",
+            "custom-reports",
+            "--data-file=custom-data.json",
+        ],
+    )
+
+    repository_root = Path(__file__).parents[2]
+    assert report_dir == repository_root / "custom-reports"
+    assert data_file == repository_root / "custom-data.json"
+
+
+def test_partial_runner_output_does_not_update_refinement_coverage(tmp_path):
+    scenario_dir = tmp_path / "partial-scenario"
+    report_dir = tmp_path / "partial-reports"
+    data_file = tmp_path / "partial-data.json"
+    report_dir.mkdir()
+    data_file.write_text(
+        json.dumps({"spans": {}, "events": {}, "metrics": {}}),
+        encoding="utf-8",
+    )
+    before = run_scenario._file_state(data_file)
+
+    assert not run_scenario._update_refinement_coverage_after_run(
+        scenario_dir,
+        report_dir,
+        data_file,
+        before,
+    )
+    assert "span_refinements" not in json.loads(data_file.read_text(encoding="utf-8"))
+
+
+def test_complete_runner_output_updates_selected_paths(tmp_path):
+    scenario_dir = tmp_path / "complete-scenario"
+    report_dir = tmp_path / "complete-reports"
+    data_file = tmp_path / "complete-data.json"
+    report_dir.mkdir()
+    data_file.write_text(
+        json.dumps({"spans": {}, "events": {}, "metrics": {}}),
+        encoding="utf-8",
+    )
+    before = run_scenario._file_state(data_file)
+    data_file.write_text(
+        json.dumps(
+            {
+                "spans": {"gen_ai.invoke_agent.client": ["gen_ai.operation.name"]},
+                "events": {},
+                "metrics": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (report_dir / "reference.json").write_text(
+        json.dumps(
+            {
+                "samples": [
+                    _raw_span(
+                        "client",
+                        {
+                            "gen_ai.operation.name": "invoke_agent",
+                            "gen_ai.caller.type": "workflow",
+                            "gen_ai.caller.name": "weather_workflow",
+                        },
+                    )
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert run_scenario._update_refinement_coverage_after_run(
+        scenario_dir,
+        report_dir,
+        data_file,
+        before,
+    )
+    updated = json.loads(data_file.read_text(encoding="utf-8"))
+    assert updated["span_refinements"] == {
+        "gen_ai.invoke_agent.caller.client": [
+            "gen_ai.caller.name",
+            "gen_ai.caller.type",
+        ]
+    }
+
+
 def test_invoke_agent_client_does_not_duplicate_transfer_target():
     spec = span_specs()["invoke_agent_client"]
     attributes = spec.required + spec.conditionally_required + spec.recommended + spec.opt_in
@@ -431,9 +540,7 @@ def test_invoke_agent_caller_is_a_span_refinement():
     invoke_agent_client = spans.split("- type: gen_ai.invoke_agent.client", 1)[1].split(
         "- type: gen_ai.invoke_agent.internal", 1
     )[0]
-    caller = refinements.split("- id: gen_ai.invoke_agent.caller.client", 1)[1].split(
-        "\n  - id:", 1
-    )[0]
+    caller = refinements.split("- id: gen_ai.invoke_agent.caller.client", 1)[1].split("\n  - id:", 1)[0]
 
     assert "- key: gen_ai.caller.type" in registry_model
     assert 'value: "agent"' in registry_model
@@ -485,6 +592,27 @@ def test_google_adk_remote_agent_runs_under_a_named_workflow():
     assert 'self.client_caller_name != "weather_workflow"' in scenario
     assert 'attribute.startswith("gen_ai.caller.")' not in scenario
     assert 'f"invoke_workflow {workflow.name}"' in scenario
+
+
+def test_google_adk_remote_client_records_available_version_and_errors():
+    path = Path(__file__).parents[1] / "scenarios" / "google-adk" / "scenario.py"
+    scenario = path.read_text(encoding="utf-8")
+
+    assert '"gen_ai.agent.version": agent_card.version' in scenario
+    assert 'client_span.set_attribute("error.type", type(error).__qualname__)' in scenario
+
+
+def test_langchain_transfer_graph_runs_under_workflow_span():
+    path = Path(__file__).parents[1] / "scenarios" / "langchain" / "scenario.py"
+    scenario = path.read_text(encoding="utf-8")
+    transfer = scenario.split("async def run_tool_handoff_reference()", 1)[1].split(
+        "async def run_workflow_reference()", 1
+    )[0]
+
+    workflow_start = transfer.index('f"invoke_workflow {workflow_name}"')
+    graph_run = transfer.index("await graph.ainvoke")
+    assert workflow_start < graph_run
+    assert '"gen_ai.workflow.name": workflow_name' in transfer
 
 
 def test_committed_transfer_scenarios_emit_transfer_attributes():
@@ -541,11 +669,17 @@ if __name__ == "__main__":
     with TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
         test_collect_span_refinement_coverage_uses_discriminators(tmp_path)
+        test_collect_span_refinement_coverage_excludes_type_mismatches(tmp_path)
         test_update_span_refinement_coverage_preserves_runner_data(tmp_path)
+        test_runner_output_paths_follow_conformance_flags(tmp_path)
+        test_partial_runner_output_does_not_update_refinement_coverage(tmp_path)
+        test_complete_runner_output_updates_selected_paths(tmp_path)
     test_invoke_agent_client_does_not_duplicate_transfer_target()
     test_invoke_agent_caller_is_a_span_refinement()
     test_committed_google_adk_remote_agent_covers_internal_and_client_spans()
     test_google_adk_remote_agent_runs_under_a_named_workflow()
+    test_google_adk_remote_client_records_available_version_and_errors()
+    test_langchain_transfer_graph_runs_under_workflow_span()
     test_committed_transfer_scenarios_emit_transfer_attributes()
     test_interaction_type_is_removed_from_committed_scenarios()
     print("ok")
