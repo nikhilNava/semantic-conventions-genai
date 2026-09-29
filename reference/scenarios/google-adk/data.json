@@ -276,6 +276,48 @@
         "keyed_attr": "gen_ai.tool.name",
         "operation": "execute_tool"
       }
+    },
+    {
+      "id": "missing_attribute",
+      "message": "Attribute 'gcp.vertex.agent.event_id' does not exist in the registry.",
+      "context": {
+        "attribute_key": "gcp.vertex.agent.event_id"
+      }
+    },
+    {
+      "id": "missing_attribute",
+      "message": "Attribute 'gcp.vertex.agent.invocation_id' does not exist in the registry.",
+      "context": {
+        "attribute_key": "gcp.vertex.agent.invocation_id"
+      }
+    },
+    {
+      "id": "missing_attribute",
+      "message": "Attribute 'gcp.vertex.agent.llm_request' does not exist in the registry.",
+      "context": {
+        "attribute_key": "gcp.vertex.agent.llm_request"
+      }
+    },
+    {
+      "id": "missing_attribute",
+      "message": "Attribute 'gcp.vertex.agent.llm_response' does not exist in the registry.",
+      "context": {
+        "attribute_key": "gcp.vertex.agent.llm_response"
+      }
+    },
+    {
+      "id": "missing_attribute",
+      "message": "Attribute 'gcp.vertex.agent.session_id' does not exist in the registry.",
+      "context": {
+        "attribute_key": "gcp.vertex.agent.session_id"
+      }
+    },
+    {
+      "id": "missing_attribute",
+      "message": "Attribute 'gen_ai.system' does not exist in the registry.",
+      "context": {
+        "attribute_key": "gen_ai.system"
+      }
     }
   ]
 }
