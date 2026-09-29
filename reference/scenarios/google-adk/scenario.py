@@ -761,6 +761,8 @@ def run_remote_a2a_agent_reference(topology_recorder):
         ):
             asyncio.run(_run())
         topology_recorder.assert_valid()
+
+
 def run_skills_reference():
     """Scenario: Agent Skills usage via Google ADK's SkillToolset.
 

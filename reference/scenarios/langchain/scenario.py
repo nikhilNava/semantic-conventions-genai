@@ -466,6 +466,8 @@ async def run_tool_handoff_reference():
                 ]
             ),
         )
+
+
 def run_command_execution_reference():
     """Shell command execution via LangChain's `ShellToolMiddleware."""
     print("  [execute_tool] shell command execution via ShellToolMiddleware (reference implementation)")
