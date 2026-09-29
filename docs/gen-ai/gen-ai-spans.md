@@ -1142,6 +1142,13 @@ Some tool calls have specialized semantic conventions, such as the
 [tool-based transfer refinement](gen-ai-agent-spans.md#tool-based-transfer).
 Instrumentations SHOULD apply the applicable refinement and SHOULD NOT record two different spans for one call.
 
+Some tools are specialized, such as [Agent Skills](https://agentskills.io)
+that agentic frameworks expose as tools. Instrumentations SHOULD distinguish
+generic tools from specialized ones using framework-specific tool names or
+other heuristics and record the applicable
+[refinement](/docs/gen-ai/gen-ai-agent-spans.md#execute-tool-span).
+They SHOULD NOT record two different spans for one call.
+
 **Span name** SHOULD be `execute_tool {gen_ai.tool.name}`.
 
 **Span kind** SHOULD be `INTERNAL`.

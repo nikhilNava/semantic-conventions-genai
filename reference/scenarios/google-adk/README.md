@@ -20,3 +20,4 @@ caller. ADK currently marks its A2A integration as experimental.
 | invoke_workflow | Yes — workflow agents (e.g. `SequentialAgent`) | ✅ Implemented |
 | execute_tool | Yes — ADK runs the tool | ✅ Implemented |
 | memory | Yes — memory service upsert / search | ✅ Implemented |
+| skills | Yes — `SkillToolset` runs the skill tools | ✅ Implemented |
