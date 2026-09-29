@@ -31,14 +31,6 @@
   },
   "events": {},
   "metrics": {},
-  "entities": {},
-  "span_refinements": {
-    "gen_ai.execute_tool.transfer.internal": [
-      "gen_ai.transfer.mode",
-      "gen_ai.transfer.target.name",
-      "gen_ai.transfer.target.type"
-    ]
-  },
   "findings": [
     {
       "id": "genai_content_schema",
@@ -46,6 +38,27 @@
       "context": {
         "attribute": "gen_ai.tool.definitions",
         "errors": "{\"function\":{\"description\":\"Get the current weather for a location.\",\"name\":\"get_weather\",\"parameters\":{\"additionalProperties\":false,\"properties\":{\"location\":{\"title\":\"Location\",\"type\":\"string\"}},\"required\":[\"location\"],\"title\":\"get_weather_args\",\"type\":\"object\"}},\"type\":\"function\"} is not valid under any of the schemas listed in the 'anyOf' keyword"
+      }
+    },
+    {
+      "id": "missing_attribute",
+      "message": "Attribute 'process.executable.name' does not exist in the registry.",
+      "context": {
+        "attribute_key": "process.executable.name"
+      }
+    },
+    {
+      "id": "missing_attribute",
+      "message": "Attribute 'process.executable.path' does not exist in the registry.",
+      "context": {
+        "attribute_key": "process.executable.path"
+      }
+    },
+    {
+      "id": "missing_attribute",
+      "message": "Attribute 'process.exit.code' does not exist in the registry.",
+      "context": {
+        "attribute_key": "process.exit.code"
       }
     },
     {
@@ -98,42 +111,29 @@
     },
     {
       "id": "genai_span_name_format",
-      "message": "execute_tool span name should be 'execute_tool' or 'execute_tool <value of gen_ai.tool.name>', got 'execute_tool weather-specialist weather-specialist'",
-      "context": {
-        "expected_form": "execute_tool or 'execute_tool <gen_ai.tool.name>'",
-        "keyed_attr": "gen_ai.tool.name",
-        "operation": "execute_tool"
-      }
-    },
-    {
-      "id": "missing_attribute",
-      "message": "Attribute 'process.executable.name' does not exist in the registry.",
-      "context": {
-        "attribute_key": "process.executable.name"
-      }
-    },
-    {
-      "id": "missing_attribute",
-      "message": "Attribute 'process.executable.path' does not exist in the registry.",
-      "context": {
-        "attribute_key": "process.executable.path"
-      }
-    },
-    {
-      "id": "missing_attribute",
-      "message": "Attribute 'process.exit.code' does not exist in the registry.",
-      "context": {
-        "attribute_key": "process.exit.code"
-      }
-    },
-    {
-      "id": "genai_span_name_format",
       "message": "execute_tool span name should be 'execute_tool' or 'execute_tool <value of gen_ai.tool.name>', got 'execute_tool exec_command bash'",
       "context": {
         "expected_form": "execute_tool or 'execute_tool <gen_ai.tool.name>'",
         "keyed_attr": "gen_ai.tool.name",
         "operation": "execute_tool"
       }
+    },
+    {
+      "id": "genai_span_name_format",
+      "message": "execute_tool span name should be 'execute_tool' or 'execute_tool <value of gen_ai.tool.name>', got 'execute_tool weather-specialist weather-specialist'",
+      "context": {
+        "expected_form": "execute_tool or 'execute_tool <gen_ai.tool.name>'",
+        "keyed_attr": "gen_ai.tool.name",
+        "operation": "execute_tool"
+      }
     }
-  ]
+  ],
+  "entities": {},
+  "span_refinements": {
+    "gen_ai.execute_tool.transfer.internal": [
+      "gen_ai.transfer.mode",
+      "gen_ai.transfer.target.name",
+      "gen_ai.transfer.target.type"
+    ]
+  }
 }

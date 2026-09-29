@@ -4,11 +4,11 @@ import asyncio
 import contextlib
 import json
 import os
+import pathlib
+import shutil
 import socket
 import subprocess
 import sys
-import pathlib
-import shutil
 import tempfile
 import time
 import urllib.request
@@ -17,8 +17,7 @@ from urllib.parse import urlparse
 
 from opentelemetry import trace as _trace
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
-from opentelemetry.trace import SpanKind
-from opentelemetry.trace import StatusCode
+from opentelemetry.trace import SpanKind, StatusCode
 from reference_shared import (
     flush_and_shutdown,
     reference_meter,
