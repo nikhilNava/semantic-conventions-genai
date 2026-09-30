@@ -293,8 +293,7 @@
       "context": {
         "missing_attribute": "gen_ai.usage.output_tokens",
         "operation": "invoke_agent"
-      },
-      "span_refinements": {}
+      }
     }
   ],
   "entities": {
@@ -307,5 +306,6 @@
         "gen_ai.main_agent.name"
       ]
     }
-  }
+  },
+  "span_refinements": {}
 }
