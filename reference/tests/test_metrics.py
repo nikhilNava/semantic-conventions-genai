@@ -23,7 +23,12 @@ from semconv_genai.refinement_coverage import (
     update_span_refinement_coverage,
 )
 from semconv_genai.report import _render_signal_section
-from semconv_genai.semconv_model import metric_specs, span_refinement_specs, span_specs
+from semconv_genai.semconv_model import (
+    entity_specs,
+    metric_specs,
+    span_refinement_specs,
+    span_specs,
+)
 
 _TOOL_CALLS = "gen_ai.invoke_agent.tool_calls"
 _INFERENCE_CALLS = "gen_ai.invoke_agent.inference_calls"
@@ -224,6 +229,37 @@ def test_committed_google_adk_metrics_round_trip():
     adk = entries["google-adk"]
     for name in (_INFERENCE_CALLS, _TOOL_CALLS):
         assert adk.metrics[name]["gen_ai.agent.name"] == "present", name
+
+
+def test_entity_specs_expose_required_id():
+    specs = entity_specs()
+    assert "gen_ai.main_agent" in specs
+    assert "gen_ai.main_agent.id" in specs["gen_ai.main_agent"].required
+
+
+def test_entities_keep_their_registry_names():
+    entry = _normalize_scenario_data_entry(
+        {"entities": {"gen_ai.main_agent": ["gen_ai.main_agent.id"]}},
+        "fake",
+    )
+    assert entry.entities["gen_ai.main_agent"]["gen_ai.main_agent.id"] == "present"
+
+
+def test_entities_with_sections_round_trip():
+    entry = _normalize_scenario_data_entry(
+        {
+            "entities": {
+                "gen_ai.main_agent": {
+                    "identity": ["gen_ai.main_agent.id"],
+                    "description": ["gen_ai.main_agent.description", "gen_ai.main_agent.name"],
+                }
+            }
+        },
+        "fake",
+    )
+    assert entry.entities["gen_ai.main_agent"]["gen_ai.main_agent.id"] == "present"
+    assert entry.entities["gen_ai.main_agent"]["gen_ai.main_agent.description"] == "present"
+    assert entry.entities["gen_ai.main_agent"]["gen_ai.main_agent.name"] == "present"
 
 
 def test_registry_span_names_map_onto_report_keys():
@@ -658,6 +694,8 @@ if __name__ == "__main__":
     test_committed_refinement_reports_preserve_reference_coverage()
     test_committed_metrics_do_not_include_transfer_attributes()
     test_committed_google_adk_metrics_round_trip()
+    test_entity_specs_expose_required_id()
+    test_entities_keep_their_registry_names()
     test_registry_span_names_map_onto_report_keys()
     test_events_keep_their_registry_names()
     test_span_types_absent_from_a_data_file_are_not_reported()
