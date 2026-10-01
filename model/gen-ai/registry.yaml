@@ -495,12 +495,15 @@ attributes:
           stability: development
     brief: The type of the immediate logical caller that initiated the operation.
     note: |
-      Instrumentations MUST NOT infer caller identity from span hierarchy,
-      span names, timing, or application-specific conventions.
+      Instrumentations SHOULD record this attribute when the caller type is
+      readily available from the instrumented library API or state.
     stability: development
   - key: gen_ai.caller.name
     type: string
     brief: The human-readable name of the immediate logical caller that initiated the operation.
+    note: |
+      Instrumentations SHOULD record this attribute when the caller name is
+      readily available from the instrumented library API or state.
     examples: ["planner_agent", "weather_workflow"]
     stability: development
   - key: gen_ai.transfer.mode
@@ -512,17 +515,21 @@ attributes:
           stability: development
         - id: pass_control
           value: "pass_control"
-          brief: The target takes control of the remaining work.
+          brief: The initiator does not wait for the target to finish. The target takes control of the remaining work.
           stability: development
     brief: Describes how control passes to the transfer target.
     note: |
-      Instrumentations MUST NOT infer any `gen_ai.transfer.*` attribute from span
-      hierarchy, tool names, timing, or application-specific conventions.
+      Instrumentations SHOULD record this attribute when the instrumented
+      framework or protocol explicitly exposes the tool call as a transfer and
+      makes the transfer mode readily available.
     stability: development
   - key: gen_ai.transfer.target.name
     type: string
     brief: The human-readable name of the transfer target.
-    examples: ["weather_agent", "human_support"]
+    note: |
+      Instrumentations SHOULD record this attribute when the transfer target
+      name is readily available from the instrumented library API or state.
+    examples: ["weather_agent"]
     stability: development
   - key: gen_ai.transfer.target.type
     type:
@@ -531,15 +538,10 @@ attributes:
           value: "agent"
           brief: A GenAI agent.
           stability: development
-        - id: human
-          value: "human"
-          brief: A person or group of people.
-          stability: development
-        - id: workflow
-          value: "workflow"
-          brief: A workflow or workflow step.
-          stability: development
     brief: The type of the transfer target.
+    note: |
+      Instrumentations SHOULD record this attribute when the transfer target
+      type is readily available from the instrumented library API or state.
     stability: development
   - key: gen_ai.main_agent.id
     type: string

@@ -95,12 +95,16 @@ def test_execute_tool_transfer_is_a_span_refinement():
 
     transfer = refinements.split("- id: gen_ai.execute_tool.transfer.internal", 1)[1]
 
-    assert "applicable refinement" in execute_tool
-    assert "SHOULD NOT record two different spans for one call" in execute_tool
+    assert "instrumented library API or state" in execute_tool
+    assert "[refinement](gen-ai-agent-spans.md#execute-tool-span)" in execute_tool
+    assert "SHOULD NOT record two" in execute_tool
+    assert "different spans for one call" in execute_tool
 
     assert "ref: gen_ai.execute_tool.internal" in transfer
     assert "execute_tool {gen_ai.tool.name} {gen_ai.transfer.target.name}" in transfer
-    assert "even when the transfer attempt fails" in transfer
+    assert "including when the transfer attempt fails" in transfer
+    assert "MUST NOT be" in transfer
+    assert "used for transfers that are not tool executions" in transfer
     assert "does not produce an additional span" in transfer
 
     for attribute in (
@@ -130,11 +134,11 @@ def test_transfer_examples_use_target_qualified_names_when_available():
     assert 'f"execute_tool {weather_tool.name} {specialist.name}"' in openai_agents
     assert '"execute_tool transfer_to_weather_agent"' in langchain
     assert "gen_ai.transfer.target.type" not in langchain
-    assert "[tool-based transfer refinement](gen-ai-agent-spans.md#tool-based-transfer)" in base_spans
-    assert "`execute_tool transfer_to_weather_agent weather_agent`" in agent_spans
+    assert "[agents exposed as tools](gen-ai-agent-spans.md#agent-as-a-tool)" in base_spans
+    assert "### Agent as a tool" in agent_spans
     assert "`execute_tool transfer_to_weather_agent weather_agent`" in interaction_examples
     assert "`execute_tool transfer_to_weather_agent`" in interaction_examples
-    assert "[tool-based transfer refinement](../gen-ai-agent-spans.md#tool-based-transfer)" in interaction_examples
+    assert "[agent-as-a-tool refinement](../gen-ai-agent-spans.md#agent-as-a-tool)" in interaction_examples
 
 
 def test_caller_refinement_is_documented_with_workflow_example():
@@ -145,8 +149,7 @@ def test_caller_refinement_is_documented_with_workflow_example():
     ).read_text(encoding="utf-8")
 
     assert 'select(.id == "gen_ai.invoke_agent.caller.client")' in agent_spans
-    assert "### Caller-aware remote invocation" in agent_spans
-    assert "[`invoke_agent` caller refinement](#caller-aware-remote-invocation)" in agent_spans
+    assert "## Caller-aware remote invocation" in agent_spans
     assert "`gen_ai.caller.type`" in interaction_examples
     assert "`gen_ai.caller.name`" in interaction_examples
     assert "gen_ai.transfer.*` is not recorded because remote invocation" not in interaction_examples
@@ -154,17 +157,19 @@ def test_caller_refinement_is_documented_with_workflow_example():
     assert "[caller-aware refinement](../gen-ai-agent-spans.md#caller-aware-remote-invocation)" in interaction_examples
 
 
-def test_agent_interaction_refinements_share_a_top_level_section():
+def test_agent_interaction_refinements_are_grouped_by_base_span():
     repository_root = Path(__file__).parents[2]
     agent_spans = (repository_root / "docs" / "gen-ai" / "gen-ai-agent-spans.md").read_text(encoding="utf-8")
 
-    interactions = agent_spans.index("## Agent-to-agent interactions")
-    caller = agent_spans.index("### Caller-aware remote invocation")
-    transfer = agent_spans.index("### Tool-based transfer")
+    caller = agent_spans.index("## Caller-aware remote invocation")
+    execute_tool = agent_spans.index("## Execute tool span")
+    transfer = agent_spans.index("### Agent as a tool")
+    skills = agent_spans.index("### Agent skills")
 
-    assert interactions < caller < transfer
-    assert "    - [Caller-aware remote invocation](#caller-aware-remote-invocation)" in agent_spans
-    assert "    - [Tool-based transfer](#tool-based-transfer)" in agent_spans
+    assert caller < execute_tool < transfer < skills
+    assert "  - [Caller-aware remote invocation](#caller-aware-remote-invocation)" in agent_spans
+    assert "    - [Agent as a tool](#agent-as-a-tool)" in agent_spans
+    assert "    - [Agent skills](#agent-skills)" in agent_spans
 
 
 def test_generated_base_span_docs_exclude_refinement_only_attributes():
@@ -586,7 +591,8 @@ def test_invoke_agent_caller_is_a_span_refinement():
     assert "ref: gen_ai.invoke_agent.client" in caller
     assert "does not produce an additional span" in caller
     assert "even when the invocation fails" in caller
-    assert "MUST NOT infer" in caller
+    assert "readily available from the instrumented" in caller
+    assert "MUST NOT infer" not in caller
     assert "- ref: gen_ai.transfer." not in caller
 
     for attribute in _CALLER_ATTRIBUTES:
@@ -610,24 +616,57 @@ def test_committed_google_adk_remote_agent_covers_internal_and_client_spans():
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in invoke_agent_client)
 
 
-def test_google_adk_remote_agent_runs_under_a_named_workflow():
+def test_google_adk_remote_agent_uses_per_invocation_caller_state():
     path = Path(__file__).parents[1] / "scenarios" / "google-adk" / "scenario.py"
     scenario = path.read_text(encoding="utf-8")
 
-    assert "SequentialAgent(" in scenario
+    assert "Workflow(" in scenario
+    assert "AgentTool(agent=agent_remote_agent)" in scenario
     assert 'name="weather_workflow"' in scenario
-    assert "sub_agents=[remote_agent]" in scenario
-    assert "caller = remote_agent.parent_agent" in scenario
-    assert "isinstance(caller, SequentialAgent)" in scenario
-    assert "caller.name != workflow.name" in scenario
-    assert '"gen_ai.caller.type": "workflow"' in scenario
-    assert '"gen_ai.caller.name": caller.name' in scenario
+    assert "edges=[(START, workflow_remote_agent)]" in scenario
+    assert "ctx.parent_ctx.node" in scenario
+    assert "tool_context._invocation_context.agent" in scenario
+    assert "_A2A_CALL_CONTEXT_KEY" in scenario
+    assert "_otel_context.attach(" in scenario
+    assert "_otel_context.detach(" in scenario
+    assert "_otel_context.get_value(_A2A_CALL_CONTEXT_KEY)" in scenario
+    assert "request_barrier = asyncio.Barrier(2)" in scenario
+    assert "await asyncio.wait_for(request_barrier.wait(), timeout=10)" in scenario
+    assert "asyncio.gather(" in scenario
+    assert "remote_agent.parent_agent" not in scenario
+    assert '"gen_ai.caller.type": call_context["caller_type"]' in scenario
+    assert '"gen_ai.caller.name": call_context["caller_name"]' in scenario
     assert 'attributes.get("gen_ai.caller.type")' in scenario
     assert 'attributes.get("gen_ai.caller.name")' in scenario
-    assert 'self.client_caller_type != "workflow"' in scenario
-    assert 'self.client_caller_name != "weather_workflow"' in scenario
+    assert '("workflow", "weather_workflow")' in scenario
+    assert '("agent", "routing_agent")' in scenario
+    assert "self.client_calls != expected_calls" in scenario
     assert 'attribute.startswith("gen_ai.caller.")' not in scenario
     assert 'f"invoke_workflow {workflow.name}"' in scenario
+
+
+def test_caller_and_transfer_guidance_is_positive_and_scoped():
+    model_dir = Path(__file__).parents[2] / "model" / "gen-ai"
+    registry = (model_dir / "registry.yaml").read_text(encoding="utf-8")
+    spans = (model_dir / "spans.yaml").read_text(encoding="utf-8")
+
+    caller_registry = registry.split("- key: gen_ai.caller.type", 1)[1].split("- key: gen_ai.transfer.mode", 1)[0]
+    assert "readily available from the instrumented library API or state" in caller_registry
+    assert "MUST NOT infer caller identity" not in caller_registry
+
+    transfer_registry = registry.split("- key: gen_ai.transfer.mode", 1)[1].split("- key: gen_ai.main_agent.id", 1)[0]
+    assert "The initiator does not wait for the target to finish." in transfer_registry
+    assert "- id: human" not in transfer_registry
+    assert "- id: workflow" not in transfer_registry
+
+    transfer = spans.split("- id: gen_ai.execute_tool.transfer.internal", 1)[1].split(
+        "- id: gen_ai.execute_tool.load_skill.internal", 1
+    )[0]
+    assert "instead" in transfer
+    assert "of the generic execute-tool span contract" in transfer
+    assert "including when the transfer attempt fails" in transfer
+    assert "remote agent invocation rather than a tool execution" not in transfer
+    assert "dedicated in-process non-tool transfer" not in transfer
 
 
 def test_google_adk_remote_client_records_available_version_and_errors():
@@ -689,7 +728,7 @@ if __name__ == "__main__":
     test_execute_tool_transfer_is_a_span_refinement()
     test_transfer_examples_use_target_qualified_names_when_available()
     test_caller_refinement_is_documented_with_workflow_example()
-    test_agent_interaction_refinements_share_a_top_level_section()
+    test_agent_interaction_refinements_are_grouped_by_base_span()
     test_generated_base_span_docs_exclude_refinement_only_attributes()
     test_committed_refinement_reports_preserve_reference_coverage()
     test_committed_metrics_do_not_include_transfer_attributes()
@@ -715,7 +754,7 @@ if __name__ == "__main__":
     test_invoke_agent_client_does_not_duplicate_transfer_target()
     test_invoke_agent_caller_is_a_span_refinement()
     test_committed_google_adk_remote_agent_covers_internal_and_client_spans()
-    test_google_adk_remote_agent_runs_under_a_named_workflow()
+    test_google_adk_remote_agent_uses_per_invocation_caller_state()
     test_google_adk_remote_client_records_available_version_and_errors()
     test_langchain_transfer_graph_runs_under_workflow_span()
     test_committed_transfer_scenarios_emit_transfer_attributes()

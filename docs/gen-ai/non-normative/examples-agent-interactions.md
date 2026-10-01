@@ -7,7 +7,7 @@ interactions. These examples are non-normative.
 
 Some frameworks expose another agent as a tool. The framework records the tool
 execution using the `gen_ai.execute_tool.transfer.internal`
-[tool-based transfer refinement](../gen-ai-agent-spans.md#tool-based-transfer)
+[agent-as-a-tool refinement](../gen-ai-agent-spans.md#agent-as-a-tool)
 of the generic `gen_ai.execute_tool.internal` span:
 
 - `gen_ai.agent.*` identifies the source agent executing the tool.
@@ -63,10 +63,11 @@ When the library explicitly exposes the immediate logical caller, use the
 
 For example, Google ADK's `RemoteA2aAgent` can discover a remote agent from its
 Agent Card and invoke it with the A2A protocol's `SendMessage` operation. When
-the `RemoteA2aAgent` belongs to a `SequentialAgent` named `weather_workflow`,
-ADK exposes that workflow through the remote agent's `parent_agent` state at
-the A2A call boundary. The CLIENT span can therefore record the workflow as its
-logical caller.
+an ADK `Workflow` directly schedules a `RemoteA2aAgent`, the node execution
+context exposes both the parent workflow and the remote target. Instrumentation
+can propagate that per-invocation caller identity to the A2A request boundary.
+Similarly, when an agent invokes a `RemoteA2aAgent` through `AgentTool`, the
+tool context exposes the executing agent and configured remote target.
 
 The local `RemoteA2aAgent` execution is an `invoke_agent` INTERNAL span, and the
 protocol request is its `invoke_agent` CLIENT child. The caller attributes
