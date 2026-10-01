@@ -13,6 +13,7 @@
       "gen_ai.tool.type"
     ],
     "gen_ai.invoke_agent.client": [
+      "error.type",
       "gen_ai.agent.description",
       "gen_ai.agent.name",
       "gen_ai.agent.version",
@@ -79,6 +80,13 @@
     ]
   },
   "findings": [
+    {
+      "id": "missing_attribute",
+      "message": "Attribute 'exception.escaped' does not exist in the registry.",
+      "context": {
+        "attribute_key": "exception.escaped"
+      }
+    },
     {
       "id": "genai_content_schema",
       "message": "Attribute 'gen_ai.tool.definitions' value does not conform to the GenAI schema: {\"description\":\"Get the current weather.\",\"name\":\"get_weather\",\"parameters\":{\"properties\":{\"location\":{\"description\":\"City name\",\"type\":\"STRING\"}},\"required\":[\"location\"],\"type\":\"OBJECT\"}} is not valid under any of the schemas listed in the 'anyOf' keyword",
