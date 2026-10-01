@@ -1,6 +1,6 @@
 # Execute Tool Transfer Span Refinement
 
-> **[Semantic Convention](../../docs/gen-ai/gen-ai-agent-spans.md#tool-based-transfer)**
+> **[Semantic Convention](../../docs/gen-ai/gen-ai-agent-spans.md#agent-as-a-tool)**
 
 ## Conditionally Required
 

@@ -646,7 +646,8 @@ def run_remote_a2a_agent_reference(topology_recorder):
     from google.adk.a2a import _compat as adk_a2a_compat
     from google.adk.agents import Agent
     from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH, RemoteA2aAgent
-    from google.adk.models.google_llm import Gemini
+    from google.adk.models.base_llm import BaseLlm
+    from google.adk.models.llm_response import LlmResponse
     from google.adk.runners import Runner
     from google.adk.sessions import InMemorySessionService
     from google.adk.tools.agent_tool import AgentTool
@@ -670,10 +671,37 @@ def run_remote_a2a_agent_reference(topology_recorder):
             edges=[(START, workflow_remote_agent)],
         )
         agent_tool = AgentTool(agent=agent_remote_agent)
+
+        class _AgentToolModel(BaseLlm):
+            turn: int = 0
+
+            async def generate_content_async(self, llm_request, stream=False):
+                self.turn += 1
+                if self.turn == 1:
+                    yield LlmResponse(
+                        content=types.Content(
+                            role="model",
+                            parts=[
+                                types.Part.from_function_call(
+                                    name=agent_remote_agent.name,
+                                    args={"request": "What's the weather in Portland?"},
+                                )
+                            ],
+                        )
+                    )
+                    return
+                yield LlmResponse(
+                    content=types.Content(
+                        role="model",
+                        parts=[types.Part.from_text(text="The remote weather agent responded.")],
+                    )
+                )
+
+        routing_model = _AgentToolModel(model="reference-agent-tool-model")
         routing_agent = Agent(
             name="routing_agent",
             description="Routes weather questions to the remote weather agent.",
-            model=Gemini(model="gemini-2.0-flash", base_url=MOCK_BASE_URL),
+            model=routing_model,
             instruction="Use the agent_remote_agent tool for weather questions.",
             tools=[agent_tool],
         )
@@ -836,7 +864,7 @@ def run_remote_a2a_agent_reference(topology_recorder):
             agent_attributes = {
                 "gen_ai.operation.name": "invoke_agent",
                 "gen_ai.agent.name": routing_agent.name,
-                "gen_ai.request.model": "gemini-2.0-flash",
+                "gen_ai.request.model": routing_model.model,
             }
             with _reference_tracer.start_as_current_span(
                 f"invoke_agent {routing_agent.name}",

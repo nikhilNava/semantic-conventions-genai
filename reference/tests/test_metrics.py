@@ -622,6 +622,9 @@ def test_google_adk_remote_agent_uses_per_invocation_caller_state():
 
     assert "Workflow(" in scenario
     assert "AgentTool(agent=agent_remote_agent)" in scenario
+    assert "class _AgentToolModel(BaseLlm)" in scenario
+    assert 'routing_model = _AgentToolModel(model="reference-agent-tool-model")' in scenario
+    assert "model=routing_model" in scenario
     assert 'name="weather_workflow"' in scenario
     assert "edges=[(START, workflow_remote_agent)]" in scenario
     assert "ctx.parent_ctx.node" in scenario
@@ -643,6 +646,13 @@ def test_google_adk_remote_agent_uses_per_invocation_caller_state():
     assert "self.client_calls != expected_calls" in scenario
     assert 'attribute.startswith("gen_ai.caller.")' not in scenario
     assert 'f"invoke_workflow {workflow.name}"' in scenario
+
+
+def test_execute_tool_transfer_report_links_to_agent_as_tool():
+    path = Path(__file__).parents[1] / "src" / "semconv_genai" / "report.py"
+    report_source = path.read_text(encoding="utf-8")
+
+    assert '"execute_tool_transfer": "../../docs/gen-ai/gen-ai-agent-spans.md#agent-as-a-tool"' in report_source
 
 
 def test_caller_and_transfer_guidance_is_positive_and_scoped():
