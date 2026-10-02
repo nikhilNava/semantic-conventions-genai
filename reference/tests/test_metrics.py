@@ -111,6 +111,7 @@ def test_azure_ai_inference_refinement_targets_current_foundry_models_api():
 
     assert "Microsoft Foundry Models" in spans_model
     assert "azure/foundry/foundry-models/concepts/endpoints" in spans_model
+    assert "Azure AI Inference clients" not in spans_model
     assert 'value: "azure.ai.inference"' in provider_registry
     assert "Microsoft Foundry Models" in provider_registry
 

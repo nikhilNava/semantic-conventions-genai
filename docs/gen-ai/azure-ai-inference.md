@@ -30,7 +30,7 @@ The Semantic Conventions for [Microsoft Foundry Models](https://learn.microsoft.
 
 **Status:** ![Development](https://img.shields.io/badge/-development-blue)
 
-Semantic Conventions for [Azure AI Inference](https://learn.microsoft.com/rest/api/microsoft-foundry/modelinference/) client spans extend and override the semantic conventions for [Gen AI Spans](gen-ai-spans.md).
+Semantic Conventions for [Microsoft Foundry Models](https://learn.microsoft.com/azure/foundry/foundry-models/concepts/endpoints) client spans extend and override the semantic conventions for [Gen AI Spans](gen-ai-spans.md).
 
 `gen_ai.provider.name` MUST be set to `"azure.ai.inference"` and SHOULD be provided **at span creation time**.
 
@@ -153,7 +153,7 @@ version identifier used by that system.
 
 **[12] `server.port`:** When observed from the client side, and when communicating through an intermediary, `server.port` SHOULD represent the server port behind any intermediaries, for example proxies, if it's available.
 
-**[13] `azure.resource_provider.namespace`:** When `azure.resource_provider.namespace` attribute is populated, it MUST be set to `Microsoft.CognitiveServices` for all operations performed by Azure AI Inference clients.
+**[13] `azure.resource_provider.namespace`:** When `azure.resource_provider.namespace` attribute is populated, it MUST be set to `Microsoft.CognitiveServices` for all operations performed by Microsoft Foundry Models clients.
 
 **[14] `gen_ai.conversation.compacted`:** This attribute is a positive indicator of context compaction. Instrumentations
 SHOULD set it to `true` only when they can reliably determine that context
@@ -378,6 +378,6 @@ See [common embedding span definition](./gen-ai-spans.md#embeddings).
 
 ## Metrics
 
-Azure AI Inference metrics follow generic [Generative AI metrics](gen-ai-metrics.md).
+Microsoft Foundry Models metrics follow generic [Generative AI metrics](gen-ai-metrics.md).
 
 [DocumentStatus]: https://opentelemetry.io/docs/specs/otel/document-status
