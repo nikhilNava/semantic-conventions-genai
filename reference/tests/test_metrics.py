@@ -147,6 +147,12 @@ def test_foundry_invoke_agent_refinement_contract():
         "**at span creation time**.\n"
     )
 
+    assert {attribute["ref"] for attribute in refinement["attributes"]} == {
+        "gen_ai.agent.name",
+        "gen_ai.conversation.id",
+        "gen_ai.request.model",
+        "server.port",
+    }
     attributes = {attribute["ref"]: attribute for attribute in refinement["attributes"]}
 
     assert _required_level(attributes["gen_ai.agent.name"]) == ("required", None)
