@@ -29,9 +29,7 @@ USER_INPUT = "Hello, agent!"
 
 
 def _route_agent_request_to_mock(request):
-    logical_base_url = urlparse(
-        f"{FOUNDRY_PROJECT_ENDPOINT}/agents/{AGENT_NAME}/endpoint/protocols/openai"
-    )
+    logical_base_url = urlparse(f"{FOUNDRY_PROJECT_ENDPOINT}/agents/{AGENT_NAME}/endpoint/protocols/openai")
     request_url = urlparse(str(request.url))
     logical_path = logical_base_url.path.rstrip("/")
     if request_url.netloc != logical_base_url.netloc or not request_url.path.startswith(logical_path):
@@ -126,34 +124,41 @@ def run_invoke_agent(client):
     with tracer.start_as_current_span(
         f"create_agent {AGENT_NAME}", kind=SpanKind.CLIENT, attributes=span_attributes
     ) as span:
-        span.set_attribute("gen_ai.agent.description", AGENT_DESCRIPTION)
-        span.set_attribute("gen_ai.system_instructions", json.dumps([{"type": "text", "content": AGENT_INSTRUCTIONS}]))
-        span.set_attribute(
-            "gen_ai.tool.definitions",
-            json.dumps(
-                [
-                    {
-                        "type": tool["type"],
-                        "name": tool["function"]["name"],
-                        "description": tool["function"]["description"],
-                        "parameters": tool["function"]["parameters"],
-                    }
-                    for tool in tool_defs
-                ]
-            ),
-        )
-        agent = client.agents.create_version(
-            agent_name=AGENT_NAME,
-            definition=PromptAgentDefinition(
-                model=AGENT_MODEL,
-                instructions=AGENT_INSTRUCTIONS,
-                tools=tool_defs,
-            ),
-            description=AGENT_DESCRIPTION,
-        )
-        span.set_attribute("gen_ai.agent.id", agent.id)
-        if getattr(agent, "version", None):
-            span.set_attribute("gen_ai.agent.version", str(agent.version))
+        try:
+            span.set_attribute("gen_ai.agent.description", AGENT_DESCRIPTION)
+            span.set_attribute(
+                "gen_ai.system_instructions",
+                json.dumps([{"type": "text", "content": AGENT_INSTRUCTIONS}]),
+            )
+            span.set_attribute(
+                "gen_ai.tool.definitions",
+                json.dumps(
+                    [
+                        {
+                            "type": tool["type"],
+                            "name": tool["function"]["name"],
+                            "description": tool["function"]["description"],
+                            "parameters": tool["function"]["parameters"],
+                        }
+                        for tool in tool_defs
+                    ]
+                ),
+            )
+            agent = client.agents.create_version(
+                agent_name=AGENT_NAME,
+                definition=PromptAgentDefinition(
+                    model=AGENT_MODEL,
+                    instructions=AGENT_INSTRUCTIONS,
+                    tools=tool_defs,
+                ),
+                description=AGENT_DESCRIPTION,
+            )
+            span.set_attribute("gen_ai.agent.id", agent.id)
+            if getattr(agent, "version", None):
+                span.set_attribute("gen_ai.agent.version", str(agent.version))
+        except Exception as error:
+            span.set_attribute("error.type", type(error).__qualname__)
+            raise
 
     openai_client = None
     conversation = None
@@ -187,7 +192,6 @@ def run_invoke_agent(client):
 
                 response_text = response.output_text
                 if response_text:
-                    span.set_attribute("gen_ai.output.type", "text")
                     span.set_attribute(
                         "gen_ai.output.messages",
                         json.dumps(
@@ -206,6 +210,7 @@ def run_invoke_agent(client):
 
                 print(f"    -> {response_text or response.id}")
             except Exception as error:
+                span.set_attribute("error.type", type(error).__qualname__)
                 span.set_status(StatusCode.ERROR, str(error))
                 raise
     except BaseException as error:  # noqa: BLE001

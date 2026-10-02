@@ -60,12 +60,17 @@ def _load_foundry_run_invoke_agent():
         def __init__(self, name):
             self.name = name
             self.attributes = {}
+            self.exception = None
             self.status = None
 
         def __enter__(self):
             return self
 
         def __exit__(self, exc_type, exc_value, traceback):
+            if exc_value is not None:
+                self.exception = exc_value
+                if self.status is None:
+                    self.status = ("error", f"{exc_type.__name__}: {exc_value}")
             return False
 
         def set_attribute(self, name, value):
@@ -322,14 +327,32 @@ def test_foundry_agent_reference_uses_agent_scoped_responses_client():
     assert ast.literal_eval(invoke_attribute_values["gen_ai.provider.name"]) == "azure.ai.foundry"
     assert ast.unparse(invoke_attribute_values["gen_ai.agent.name"]) == "agent.name"
     assert ast.unparse(invoke_attribute_values["gen_ai.conversation.id"]) == "conversation.id"
+    assert not any(isinstance(node, ast.Constant) and node.value == "agent_reference" for node in ast.walk(tree))
     assert not any(
-        isinstance(node, ast.Constant) and node.value == "agent_reference"
-        for node in ast.walk(tree)
+        isinstance(node, ast.Constant) and node.value == "gen_ai.response.finish_reasons" for node in ast.walk(tree)
     )
-    assert not any(
-        isinstance(node, ast.Constant) and node.value == "gen_ai.response.finish_reasons"
-        for node in ast.walk(tree)
-    )
+    assert not any(isinstance(node, ast.Constant) and node.value == "gen_ai.output.type" for node in ast.walk(tree))
+
+
+def test_foundry_agent_reference_records_create_agent_error_type():
+    run_invoke_agent, spans = _load_foundry_run_invoke_agent()
+    creation_error = RuntimeError("agent creation failed")
+
+    class FakeAgents:
+        def create_version(self, **kwargs):
+            raise creation_error
+
+    class FakeClient:
+        agents = FakeAgents()
+
+    with pytest.raises(RuntimeError) as caught:
+        run_invoke_agent(FakeClient())
+
+    assert caught.value is creation_error
+    create_span = spans["create_agent refimpl-test-agent"]
+    assert create_span.attributes["error.type"] == "RuntimeError"
+    assert create_span.status == ("error", "RuntimeError: agent creation failed")
+    assert create_span.exception is creation_error
 
 
 def test_foundry_agent_reference_preserves_invocation_failure_when_cleanup_fails():
@@ -378,7 +401,10 @@ def test_foundry_agent_reference_preserves_invocation_failure_when_cleanup_fails
         conversation_cleanup_error,
         agent_cleanup_error,
     )
-    assert spans["invoke_agent refimpl-test-agent"].status == ("error", "invocation failed")
+    invoke_span = spans["invoke_agent refimpl-test-agent"]
+    assert invoke_span.attributes["error.type"] == "RuntimeError"
+    assert invoke_span.status == ("error", "invocation failed")
+    assert invoke_span.exception is invocation_error
 
 
 def test_foundry_agent_reference_attempts_all_cleanup_after_base_exceptions():
@@ -577,6 +603,7 @@ if __name__ == "__main__":
     test_span_specs_are_named_as_the_registry_names_them()
     test_foundry_invoke_agent_refinement_contract()
     test_foundry_agent_reference_uses_agent_scoped_responses_client()
+    test_foundry_agent_reference_records_create_agent_error_type()
     test_foundry_agent_reference_preserves_invocation_failure_when_cleanup_fails()
     test_foundry_agent_reference_attempts_all_cleanup_after_base_exceptions()
     test_foundry_agent_reference_raises_cleanup_only_failure()
