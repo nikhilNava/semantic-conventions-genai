@@ -101,7 +101,13 @@ def _load_foundry_run_invoke_agent():
     return namespace["run_invoke_agent"], spans
 
 
-def _run_foundry_program(client, run_invoke_agent, flush_and_shutdown):
+def _run_foundry_program(
+    client,
+    run_invoke_agent,
+    flush_and_shutdown,
+    *,
+    project_client_factory=None,
+):
     scenario_path = _SEMCONV_ROOT / "reference" / "scenarios" / "azure-ai-foundry" / "scenario.py"
     tree = ast.parse(scenario_path.read_text(encoding="utf-8"))
     main_guard = next(
@@ -113,7 +119,7 @@ def _run_foundry_program(client, run_invoke_agent, flush_and_shutdown):
         and node.test.left.id == "__name__"
     )
     namespace = {
-        "AIProjectClient": lambda **kwargs: client,
+        "AIProjectClient": project_client_factory or (lambda **kwargs: client),
         "FOUNDRY_PROJECT_ENDPOINT": "https://foundry-resource.services.ai.azure.com/api/projects/reference-project",
         "MockCredential": lambda: object(),
         "MockTransportPolicy": lambda: object(),
@@ -375,6 +381,66 @@ def test_foundry_agent_reference_preserves_invocation_failure_when_cleanup_fails
     assert spans["invoke_agent refimpl-test-agent"].status == ("error", "invocation failed")
 
 
+def test_foundry_agent_reference_attempts_all_cleanup_after_base_exceptions():
+    run_invoke_agent, _ = _load_foundry_run_invoke_agent()
+    events = []
+    invocation_error = KeyboardInterrupt("invocation interrupted")
+    conversation_cleanup_error = SystemExit("conversation cleanup exited")
+    client_cleanup_error = KeyboardInterrupt("OpenAI client close interrupted")
+    agent_cleanup_error = SystemExit("agent cleanup exited")
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            events.append("responses.create")
+            raise invocation_error
+
+    class FakeConversations:
+        def create(self):
+            return SimpleNamespace(id="conversation-id")
+
+        def delete(self, **kwargs):
+            events.append("conversations.delete")
+            raise conversation_cleanup_error
+
+    class FakeOpenAIClient:
+        conversations = FakeConversations()
+        responses = FakeResponses()
+
+        def close(self):
+            events.append("openai_client.close")
+            raise client_cleanup_error
+
+    class FakeAgents:
+        def create_version(self, **kwargs):
+            return SimpleNamespace(id="agent-id", name="refimpl-test-agent", version="1")
+
+        def delete_version(self, **kwargs):
+            events.append("agents.delete_version")
+            raise agent_cleanup_error
+
+    class FakeClient:
+        agents = FakeAgents()
+
+        def get_openai_client(self, **kwargs):
+            return FakeOpenAIClient()
+
+    with pytest.raises(BaseExceptionGroup) as caught:
+        run_invoke_agent(FakeClient())
+
+    assert caught.value.exceptions == (
+        invocation_error,
+        conversation_cleanup_error,
+        client_cleanup_error,
+        agent_cleanup_error,
+    )
+    assert events == [
+        "responses.create",
+        "conversations.delete",
+        "openai_client.close",
+        "agents.delete_version",
+    ]
+
+
 def test_foundry_agent_reference_raises_cleanup_only_failure():
     run_invoke_agent, _ = _load_foundry_run_invoke_agent()
     cleanup_error = RuntimeError("conversation cleanup failed")
@@ -472,6 +538,33 @@ def test_foundry_program_attempts_shutdown_after_cleanup_only_base_exception():
     assert events == ["run_invoke_agent", "client.close", "flush_and_shutdown"]
 
 
+def test_foundry_program_shuts_down_telemetry_when_client_construction_fails():
+    events = []
+    constructor_error = RuntimeError("project client construction failed")
+
+    def fail_client_construction(**kwargs):
+        events.append("AIProjectClient")
+        raise constructor_error
+
+    def fail_if_run(_client):
+        pytest.fail("run_invoke_agent must not run without a project client")
+
+    def shutdown_successfully(tp, lp, mp):
+        assert (tp, lp, mp) == ("tracer-provider", "logger-provider", "meter-provider")
+        events.append("flush_and_shutdown")
+
+    with pytest.raises(RuntimeError) as caught:
+        _run_foundry_program(
+            None,
+            fail_if_run,
+            shutdown_successfully,
+            project_client_factory=fail_client_construction,
+        )
+
+    assert caught.value is constructor_error
+    assert events == ["AIProjectClient", "flush_and_shutdown"]
+
+
 if __name__ == "__main__":
     test_metric_specs_expose_recommended_agent_name()
     test_metric_specs_are_named_as_the_registry_names_them()
@@ -485,7 +578,9 @@ if __name__ == "__main__":
     test_foundry_invoke_agent_refinement_contract()
     test_foundry_agent_reference_uses_agent_scoped_responses_client()
     test_foundry_agent_reference_preserves_invocation_failure_when_cleanup_fails()
+    test_foundry_agent_reference_attempts_all_cleanup_after_base_exceptions()
     test_foundry_agent_reference_raises_cleanup_only_failure()
     test_foundry_program_preserves_run_failure_when_all_cleanup_fails()
     test_foundry_program_attempts_shutdown_after_cleanup_only_base_exception()
+    test_foundry_program_shuts_down_telemetry_when_client_construction_fails()
     print("ok")

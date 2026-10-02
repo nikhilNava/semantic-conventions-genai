@@ -216,16 +216,16 @@ def run_invoke_agent(client):
         if conversation is not None:
             try:
                 openai_client.conversations.delete(conversation_id=conversation.id)
-            except Exception as error:  # noqa: BLE001
+            except BaseException as error:  # noqa: BLE001
                 cleanup_errors.append(error)
         if openai_client is not None:
             try:
                 openai_client.close()
-            except Exception as error:  # noqa: BLE001
+            except BaseException as error:  # noqa: BLE001
                 cleanup_errors.append(error)
         try:
             client.agents.delete_version(agent_name=agent.name, agent_version=agent.version)
-        except Exception as error:  # noqa: BLE001
+        except BaseException as error:  # noqa: BLE001
             cleanup_errors.append(error)
 
         if primary_error is not None and cleanup_errors:
@@ -236,7 +236,7 @@ def run_invoke_agent(client):
         if len(cleanup_errors) == 1:
             raise cleanup_errors[0]
         if cleanup_errors:
-            raise ExceptionGroup("Foundry agent cleanup failed", cleanup_errors)
+            raise BaseExceptionGroup("Foundry agent cleanup failed", cleanup_errors)
 
     if primary_error is not None:
         raise primary_error
@@ -246,24 +246,25 @@ if __name__ == "__main__":
     print("=== Manual: Azure AI Foundry Invoke Agent Reference Implementation ===")
     tp, lp, mp = setup_otel()
 
-    client = AIProjectClient(
-        endpoint=FOUNDRY_PROJECT_ENDPOINT,
-        credential=MockCredential(),
-        authentication_policy=SansIOHTTPPolicy(),
-        per_call_policies=[MockTransportPolicy()],
-    )
-
+    client = None
     primary_error = None
     try:
+        client = AIProjectClient(
+            endpoint=FOUNDRY_PROJECT_ENDPOINT,
+            credential=MockCredential(),
+            authentication_policy=SansIOHTTPPolicy(),
+            per_call_policies=[MockTransportPolicy()],
+        )
         run_invoke_agent(client)
     except BaseException as error:  # noqa: BLE001
         primary_error = error
 
     cleanup_errors = []
-    try:
-        client.close()
-    except BaseException as error:  # noqa: BLE001
-        cleanup_errors.append(error)
+    if client is not None:
+        try:
+            client.close()
+        except BaseException as error:  # noqa: BLE001
+            cleanup_errors.append(error)
     try:
         flush_and_shutdown(tp, lp, mp)
     except BaseException as error:  # noqa: BLE001
