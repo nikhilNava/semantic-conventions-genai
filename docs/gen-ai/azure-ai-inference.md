@@ -1,8 +1,8 @@
 <!--- Hugo front matter used to generate the website version of this page:
-linkTitle: Azure AI Inference
+linkTitle: Microsoft Foundry Models
 --->
 
-# Semantic conventions for Azure AI Inference client operations
+# Semantic conventions for Microsoft Foundry Models client operations
 
 **Status**: [Development][DocumentStatus]
 
@@ -15,7 +15,7 @@ linkTitle: Azure AI Inference
 
 <!-- tocstop -->
 
-The Semantic Conventions for [Azure AI Inference](https://learn.microsoft.com/azure/ai-studio) extend and override the [GenAI Semantic Conventions](README.md).
+The Semantic Conventions for [Microsoft Foundry Models](https://learn.microsoft.com/azure/foundry/foundry-models/concepts/endpoints) extend and override the [GenAI Semantic Conventions](README.md).
 
 ## Spans
 

@@ -10,9 +10,12 @@ Runnable directly (``python tests/test_metrics.py``) or under pytest.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from semconv_genai.data_files import _normalize_scenario_data_entry, load_scenario_data_files
 from semconv_genai.semconv_model import entity_specs, metric_specs, span_specs
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _TOOL_CALLS = "gen_ai.invoke_agent.tool_calls"
 _INFERENCE_CALLS = "gen_ai.invoke_agent.inference_calls"
 
@@ -101,6 +104,16 @@ def test_span_specs_are_named_as_the_registry_names_them():
         assert spec.registry_id.startswith("gen_ai."), key
 
 
+def test_azure_ai_inference_refinement_targets_current_foundry_models_api():
+    spans_model = (_REPO_ROOT / "model" / "gen-ai" / "spans.yaml").read_text(encoding="utf-8")
+    provider_registry = (_REPO_ROOT / "model" / "gen-ai" / "registry.yaml").read_text(encoding="utf-8")
+
+    assert "Microsoft Foundry Models" in spans_model
+    assert "azure/foundry/foundry-models/concepts/endpoints" in spans_model
+    assert 'value: "azure.ai.inference"' in provider_registry
+    assert "Microsoft Foundry Models" in provider_registry
+
+
 if __name__ == "__main__":
     test_metric_specs_expose_recommended_agent_name()
     test_metric_specs_are_named_as_the_registry_names_them()
@@ -111,4 +124,5 @@ if __name__ == "__main__":
     test_events_keep_their_registry_names()
     test_span_types_absent_from_a_data_file_are_not_reported()
     test_span_specs_are_named_as_the_registry_names_them()
+    test_azure_ai_inference_refinement_targets_current_foundry_models_api()
     print("ok")
