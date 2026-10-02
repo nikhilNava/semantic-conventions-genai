@@ -37,7 +37,7 @@ attributes:
         - id: azure.ai.inference
           stability: development
           value: "azure.ai.inference"
-          brief: '[Microsoft Foundry Models](https://learn.microsoft.com/azure/foundry/foundry-models/concepts/endpoints)'
+          brief: 'Azure AI Inference'
         - id: azure.ai.openai
           stability: development
           value: "azure.ai.openai"
