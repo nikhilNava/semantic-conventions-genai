@@ -10,8 +10,9 @@ Runnable directly (``python tests/test_metrics.py``) or under pytest.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
+
+import yaml
 
 from semconv_genai.data_files import _normalize_scenario_data_entry, load_scenario_data_files
 from semconv_genai.semconv_model import entity_specs, metric_specs, span_specs
@@ -21,26 +22,16 @@ _INFERENCE_CALLS = "gen_ai.invoke_agent.inference_calls"
 _SEMCONV_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _item_block(path: Path, marker: str) -> str | None:
-    lines = path.read_text(encoding="utf-8").splitlines()
-    start = None
-    indent = 0
-    for index, line in enumerate(lines):
-        if line.strip() == marker:
-            start = index
-            indent = len(line) - len(line.lstrip(" "))
-            break
-    if start is None:
-        return None
+def _load_semconv_yaml(relative_path: str) -> dict:
+    return yaml.safe_load((_SEMCONV_ROOT / relative_path).read_text(encoding="utf-8"))
 
-    end = len(lines)
-    item_prefix = " " * indent + "- "
-    for index in range(start + 1, len(lines)):
-        line = lines[index]
-        if line.startswith(item_prefix):
-            end = index
-            break
-    return "\n".join(lines[start:end])
+
+def _required_level(attribute: dict) -> tuple[str, str | None]:
+    level = attribute["requirement_level"]
+    if isinstance(level, str):
+        return level, None
+    name, condition = next(iter(level.items()))
+    return name, condition
 
 
 def test_metric_specs_expose_recommended_agent_name():
@@ -128,50 +119,48 @@ def test_span_specs_are_named_as_the_registry_names_them():
 
 
 def test_foundry_invoke_agent_refinement_contract():
-    provider_block = _item_block(_SEMCONV_ROOT / "model" / "gen-ai" / "registry.yaml", "- id: azure.ai.foundry")
-    assert provider_block is not None
-    provider_match = re.search(
-        r'value: "azure\.ai\.foundry"\n\s+brief: '
-        r"'\[Microsoft Foundry Agent Service\]\((?P<url>https://learn\.microsoft\.com/azure/foundry/agents/overview)\)'",
-        provider_block,
+    registry = _load_semconv_yaml("model/gen-ai/registry.yaml")
+    provider = next(
+        member
+        for attribute in registry["attributes"]
+        if attribute["key"] == "gen_ai.provider.name"
+        for member in attribute["type"]["members"]
+        if member["id"] == "azure.ai.foundry"
     )
-    assert provider_match is not None
+    assert provider["value"] == "azure.ai.foundry"
+    provider_doc = "https://learn.microsoft.com/azure/foundry/agents/overview"
+    assert provider["brief"] == f"[Microsoft Foundry Agent Service]({provider_doc})"
 
-    refinement_block = _item_block(
-        _SEMCONV_ROOT / "model" / "gen-ai" / "spans.yaml",
-        "- id: azure.ai.foundry.invoke_agent.client",
+    spans = _load_semconv_yaml("model/gen-ai/spans.yaml")
+    refinement = next(
+        item for item in spans["span_refinements"] if item["id"] == "azure.ai.foundry.invoke_agent.client"
     )
-    assert refinement_block is not None
-    assert "ref: gen_ai.invoke_agent.client" in refinement_block
-    assert (
-        f"[Microsoft Foundry Agent Service]({provider_match.group('url')})" in refinement_block
+    assert refinement["ref"] == "gen_ai.invoke_agent.client"
+    assert refinement["brief"] == (
+        f"Semantic Conventions for [Microsoft Foundry Agent Service]({provider_doc}) client spans extend and "
+        "override the semantic conventions for [Gen AI Spans](gen-ai-spans.md).\n"
     )
-    assert (
-        '`gen_ai.provider.name` MUST be set to `"azure.ai.foundry"` and SHOULD be provided '
-        "**at span creation time**." in refinement_block
-    )
-    assert (
+    assert refinement["note"] == (
         "This refinement applies when invoking a remotely hosted Foundry agent through the "
-        "agent-scoped OpenAI Responses API." in refinement_block
+        "agent-scoped OpenAI Responses API.\n\n"
+        '`gen_ai.provider.name` MUST be set to `"azure.ai.foundry"` and SHOULD be provided '
+        "**at span creation time**.\n"
     )
-    assert re.search(
-        r"- ref: gen_ai\.agent\.name\n(?:\s+.+\n)*?\s+requirement_level: required",
-        refinement_block,
+
+    attributes = {attribute["ref"]: attribute for attribute in refinement["attributes"]}
+
+    assert _required_level(attributes["gen_ai.agent.name"]) == ("required", None)
+    assert _required_level(attributes["gen_ai.conversation.id"]) == (
+        "conditionally_required",
+        "When the request references a Foundry conversation.",
     )
-    assert re.search(
-        r"- ref: gen_ai\.conversation\.id\n(?:\s+.+\n)*?\s+conditionally_required: "
-        r"When the request references a Foundry conversation\.",
-        refinement_block,
+    assert _required_level(attributes["gen_ai.request.model"]) == (
+        "recommended",
+        "When the invoked agent has one configured model and it is readily available to instrumentation.",
     )
-    assert re.search(
-        r"- ref: gen_ai\.request\.model\n(?:\s+.+\n)*?\s+recommended: "
-        r"When the invoked agent has one configured model and it is readily available to instrumentation\.",
-        refinement_block,
-    )
-    assert re.search(
-        r"- ref: server\.port\n(?:\s+.+\n)*?\s+conditionally_required: "
-        r"When the endpoint port is not the default port 443\.",
-        refinement_block,
+    assert _required_level(attributes["server.port"]) == (
+        "conditionally_required",
+        "When the endpoint port is not the default port 443.",
     )
 
 
