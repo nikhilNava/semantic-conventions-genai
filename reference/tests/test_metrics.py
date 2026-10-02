@@ -10,6 +10,7 @@ Runnable directly (``python tests/test_metrics.py``) or under pytest.
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 from semconv_genai.data_files import _normalize_scenario_data_entry, load_scenario_data_files
@@ -114,6 +115,15 @@ def test_azure_ai_inference_refinement_targets_current_foundry_models_api():
     assert "Microsoft Foundry Models" in provider_registry
 
 
+def test_foundry_models_reference_uses_supported_openai_sdk():
+    project_file = _REPO_ROOT / "reference" / "scenarios" / "azure-ai-inference" / "pyproject.toml"
+    project = tomllib.loads(project_file.read_text(encoding="utf-8"))
+    dependencies = project["project"]["dependencies"]
+
+    assert "openai==3.19.2" in dependencies
+    assert not any(dependency.startswith("azure-ai-inference==") for dependency in dependencies)
+
+
 if __name__ == "__main__":
     test_metric_specs_expose_recommended_agent_name()
     test_metric_specs_are_named_as_the_registry_names_them()
@@ -125,4 +135,5 @@ if __name__ == "__main__":
     test_span_types_absent_from_a_data_file_are_not_reported()
     test_span_specs_are_named_as_the_registry_names_them()
     test_azure_ai_inference_refinement_targets_current_foundry_models_api()
+    test_foundry_models_reference_uses_supported_openai_sdk()
     print("ok")
