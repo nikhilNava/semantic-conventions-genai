@@ -48,7 +48,7 @@ def _attribute_path(node: ast.AST) -> tuple[str, ...]:
     return tuple(reversed(path))
 
 
-def _load_foundry_run_invoke_agent():
+def _load_foundry_run_invoke_agent(*, default_http_client_factory=SimpleNamespace):
     scenario_path = _SEMCONV_ROOT / "reference" / "scenarios" / "azure-ai-foundry" / "scenario.py"
     tree = ast.parse(scenario_path.read_text(encoding="utf-8"))
     run_invoke_agent = next(
@@ -90,7 +90,7 @@ def _load_foundry_run_invoke_agent():
         "AGENT_INSTRUCTIONS": "instructions",
         "AGENT_MODEL": "model",
         "AGENT_NAME": "refimpl-test-agent",
-        "DefaultHttpxClient": SimpleNamespace,
+        "DefaultHttpxClient": default_http_client_factory,
         "PromptAgentDefinition": SimpleNamespace,
         "SpanKind": SimpleNamespace(CLIENT="client"),
         "StatusCode": SimpleNamespace(ERROR="error"),
@@ -355,6 +355,94 @@ def test_foundry_agent_reference_records_create_agent_error_type():
     assert create_span.exception is creation_error
 
 
+def test_foundry_agent_reference_closes_owned_http_client_when_openai_client_construction_fails():
+    events = []
+    construction_error = RuntimeError("OpenAI client construction failed")
+
+    class FakeHttpClient:
+        def __init__(self, **kwargs):
+            events.append("http_client.create")
+
+        def close(self):
+            events.append("http_client.close")
+
+    class FakeAgents:
+        def create_version(self, **kwargs):
+            return SimpleNamespace(id="agent-id", name="refimpl-test-agent", version="1")
+
+        def delete_version(self, **kwargs):
+            events.append("agents.delete_version")
+
+    class FakeClient:
+        agents = FakeAgents()
+
+        def get_openai_client(self, **kwargs):
+            assert isinstance(kwargs["http_client"], FakeHttpClient)
+            events.append("get_openai_client")
+            raise construction_error
+
+    run_invoke_agent, _ = _load_foundry_run_invoke_agent(default_http_client_factory=FakeHttpClient)
+
+    with pytest.raises(RuntimeError) as caught:
+        run_invoke_agent(FakeClient())
+
+    assert caught.value is construction_error
+    assert events == [
+        "http_client.create",
+        "get_openai_client",
+        "http_client.close",
+        "agents.delete_version",
+    ]
+
+
+def test_foundry_agent_reference_groups_owned_http_client_cleanup_failure_after_construction_error():
+    events = []
+    construction_error = RuntimeError("OpenAI client construction failed")
+    http_client_cleanup_error = RuntimeError("HTTP client cleanup failed")
+    agent_cleanup_error = RuntimeError("agent cleanup failed")
+
+    class FakeHttpClient:
+        def __init__(self, **kwargs):
+            events.append("http_client.create")
+
+        def close(self):
+            events.append("http_client.close")
+            raise http_client_cleanup_error
+
+    class FakeAgents:
+        def create_version(self, **kwargs):
+            return SimpleNamespace(id="agent-id", name="refimpl-test-agent", version="1")
+
+        def delete_version(self, **kwargs):
+            events.append("agents.delete_version")
+            raise agent_cleanup_error
+
+    class FakeClient:
+        agents = FakeAgents()
+
+        def get_openai_client(self, **kwargs):
+            assert isinstance(kwargs["http_client"], FakeHttpClient)
+            events.append("get_openai_client")
+            raise construction_error
+
+    run_invoke_agent, _ = _load_foundry_run_invoke_agent(default_http_client_factory=FakeHttpClient)
+
+    with pytest.raises(BaseExceptionGroup) as caught:
+        run_invoke_agent(FakeClient())
+
+    assert caught.value.exceptions == (
+        construction_error,
+        http_client_cleanup_error,
+        agent_cleanup_error,
+    )
+    assert events == [
+        "http_client.create",
+        "get_openai_client",
+        "http_client.close",
+        "agents.delete_version",
+    ]
+
+
 def test_foundry_agent_reference_preserves_invocation_failure_when_cleanup_fails():
     run_invoke_agent, spans = _load_foundry_run_invoke_agent()
     invocation_error = RuntimeError("invocation failed")
@@ -604,6 +692,8 @@ if __name__ == "__main__":
     test_foundry_invoke_agent_refinement_contract()
     test_foundry_agent_reference_uses_agent_scoped_responses_client()
     test_foundry_agent_reference_records_create_agent_error_type()
+    test_foundry_agent_reference_closes_owned_http_client_when_openai_client_construction_fails()
+    test_foundry_agent_reference_groups_owned_http_client_cleanup_failure_after_construction_error()
     test_foundry_agent_reference_preserves_invocation_failure_when_cleanup_fails()
     test_foundry_agent_reference_attempts_all_cleanup_after_base_exceptions()
     test_foundry_agent_reference_raises_cleanup_only_failure()

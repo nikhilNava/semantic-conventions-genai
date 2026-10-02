@@ -161,14 +161,16 @@ def run_invoke_agent(client):
             raise
 
     openai_client = None
+    owned_openai_http_client = None
     conversation = None
     primary_error = None
     try:
-        openai_http_client = DefaultHttpxClient(event_hooks={"request": [_route_agent_request_to_mock]})
+        owned_openai_http_client = DefaultHttpxClient(event_hooks={"request": [_route_agent_request_to_mock]})
         openai_client = client.get_openai_client(
             agent_name=agent.name,
-            http_client=openai_http_client,
+            http_client=owned_openai_http_client,
         )
+        owned_openai_http_client = None
         conversation = openai_client.conversations.create()
         span_attributes_2 = {
             "gen_ai.operation.name": "invoke_agent",
@@ -226,6 +228,11 @@ def run_invoke_agent(client):
         if openai_client is not None:
             try:
                 openai_client.close()
+            except BaseException as error:  # noqa: BLE001
+                cleanup_errors.append(error)
+        if owned_openai_http_client is not None:
+            try:
+                owned_openai_http_client.close()
             except BaseException as error:  # noqa: BLE001
                 cleanup_errors.append(error)
         try:
