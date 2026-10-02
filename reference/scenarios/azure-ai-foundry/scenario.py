@@ -155,76 +155,91 @@ def run_invoke_agent(client):
         if getattr(agent, "version", None):
             span.set_attribute("gen_ai.agent.version", str(agent.version))
 
+    openai_client = None
+    conversation = None
+    primary_error = None
     try:
         openai_http_client = DefaultHttpxClient(event_hooks={"request": [_route_agent_request_to_mock]})
         openai_client = client.get_openai_client(
             agent_name=agent.name,
             http_client=openai_http_client,
         )
-        try:
-            conversation = openai_client.conversations.create()
+        conversation = openai_client.conversations.create()
+        span_attributes_2 = {
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.provider.name": "azure.ai.foundry",
+            "gen_ai.agent.name": agent.name,
+            "gen_ai.conversation.id": conversation.id,
+            "server.address": _SERVER_ADDRESS,
+        }
+        if _SERVER_PORT is not None and _SERVER_PORT != 443:
+            span_attributes_2["server.port"] = _SERVER_PORT
+        with tracer.start_as_current_span(
+            f"invoke_agent {agent.name}",
+            kind=SpanKind.CLIENT,
+            attributes=span_attributes_2,
+        ) as span:
             try:
-                span_attributes_2 = {
-                    "gen_ai.operation.name": "invoke_agent",
-                    "gen_ai.provider.name": "azure.ai.foundry",
-                    "gen_ai.agent.name": agent.name,
-                    "gen_ai.conversation.id": conversation.id,
-                    "server.address": _SERVER_ADDRESS,
-                }
-                if _SERVER_PORT is not None and _SERVER_PORT != 443:
-                    span_attributes_2["server.port"] = _SERVER_PORT
-                with tracer.start_as_current_span(
-                    f"invoke_agent {agent.name}",
-                    kind=SpanKind.CLIENT,
-                    attributes=span_attributes_2,
-                ) as span:
-                    try:
-                        response = openai_client.responses.create(
-                            conversation=conversation.id,
-                            input=USER_INPUT,
-                        )
+                response = openai_client.responses.create(
+                    conversation=conversation.id,
+                    input=USER_INPUT,
+                )
 
-                        if response.status == "completed":
-                            span.set_attribute("gen_ai.response.finish_reasons", ["stop"])
-                        elif response.status in {"cancelled", "failed"}:
-                            span.set_attribute("gen_ai.response.finish_reasons", ["error"])
-                        elif response.status == "incomplete":
-                            incomplete_reason = getattr(response.incomplete_details, "reason", None)
-                            finish_reason = {
-                                "content_filter": "content_filter",
-                                "max_output_tokens": "length",
-                            }.get(incomplete_reason, "error")
-                            span.set_attribute("gen_ai.response.finish_reasons", [finish_reason])
+                response_text = response.output_text
+                if response_text:
+                    span.set_attribute("gen_ai.output.type", "text")
+                    span.set_attribute(
+                        "gen_ai.output.messages",
+                        json.dumps(
+                            [
+                                {
+                                    "role": "assistant",
+                                    "parts": [{"type": "text", "content": response_text}],
+                                }
+                            ]
+                        ),
+                    )
 
-                        response_text = response.output_text
-                        if response_text:
-                            span.set_attribute("gen_ai.output.type", "text")
-                            span.set_attribute(
-                                "gen_ai.output.messages",
-                                json.dumps(
-                                    [
-                                        {
-                                            "role": "assistant",
-                                            "parts": [{"type": "text", "content": response_text}],
-                                        }
-                                    ]
-                                ),
-                            )
+                if response.usage:
+                    span.set_attribute("gen_ai.usage.input_tokens", response.usage.input_tokens)
+                    span.set_attribute("gen_ai.usage.output_tokens", response.usage.output_tokens)
 
-                        if response.usage:
-                            span.set_attribute("gen_ai.usage.input_tokens", response.usage.input_tokens)
-                            span.set_attribute("gen_ai.usage.output_tokens", response.usage.output_tokens)
-
-                        print(f"    -> {response_text or response.id}")
-                    except Exception as error:
-                        span.set_status(StatusCode.ERROR, str(error))
-                        raise
-            finally:
-                openai_client.conversations.delete(conversation_id=conversation.id)
-        finally:
-            openai_client.close()
+                print(f"    -> {response_text or response.id}")
+            except Exception as error:
+                span.set_status(StatusCode.ERROR, str(error))
+                raise
+    except BaseException as error:  # noqa: BLE001
+        primary_error = error
     finally:
-        client.agents.delete_version(agent_name=agent.name, agent_version=agent.version)
+        # Continue cleanup so every failure can be reported with the primary error.
+        cleanup_errors = []
+        if conversation is not None:
+            try:
+                openai_client.conversations.delete(conversation_id=conversation.id)
+            except Exception as error:  # noqa: BLE001
+                cleanup_errors.append(error)
+        if openai_client is not None:
+            try:
+                openai_client.close()
+            except Exception as error:  # noqa: BLE001
+                cleanup_errors.append(error)
+        try:
+            client.agents.delete_version(agent_name=agent.name, agent_version=agent.version)
+        except Exception as error:  # noqa: BLE001
+            cleanup_errors.append(error)
+
+        if primary_error is not None and cleanup_errors:
+            raise BaseExceptionGroup(
+                "Foundry agent invocation and cleanup failed",
+                [primary_error, *cleanup_errors],
+            ) from None
+        if len(cleanup_errors) == 1:
+            raise cleanup_errors[0]
+        if cleanup_errors:
+            raise ExceptionGroup("Foundry agent cleanup failed", cleanup_errors)
+
+    if primary_error is not None:
+        raise primary_error
 
 
 if __name__ == "__main__":

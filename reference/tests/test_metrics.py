@@ -11,8 +11,11 @@ Runnable directly (``python tests/test_metrics.py``) or under pytest.
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 import yaml
 
 from semconv_genai.data_files import _normalize_scenario_data_entry, load_scenario_data_files
@@ -43,6 +46,59 @@ def _attribute_path(node: ast.AST) -> tuple[str, ...]:
     if isinstance(node, ast.Name):
         path.append(node.id)
     return tuple(reversed(path))
+
+
+def _load_foundry_run_invoke_agent():
+    scenario_path = _SEMCONV_ROOT / "reference" / "scenarios" / "azure-ai-foundry" / "scenario.py"
+    tree = ast.parse(scenario_path.read_text(encoding="utf-8"))
+    run_invoke_agent = next(
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "run_invoke_agent"
+    )
+    spans = {}
+
+    class FakeSpan:
+        def __init__(self, name):
+            self.name = name
+            self.attributes = {}
+            self.status = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def set_attribute(self, name, value):
+            self.attributes[name] = value
+
+        def set_status(self, code, description):
+            self.status = (code, description)
+
+    class FakeTracer:
+        def start_as_current_span(self, name, **kwargs):
+            span = FakeSpan(name)
+            spans[name] = span
+            return span
+
+    namespace = {
+        "AGENT_DESCRIPTION": "description",
+        "AGENT_INSTRUCTIONS": "instructions",
+        "AGENT_MODEL": "model",
+        "AGENT_NAME": "refimpl-test-agent",
+        "DefaultHttpxClient": SimpleNamespace,
+        "PromptAgentDefinition": SimpleNamespace,
+        "SpanKind": SimpleNamespace(CLIENT="client"),
+        "StatusCode": SimpleNamespace(ERROR="error"),
+        "USER_INPUT": "Hello, agent!",
+        "_SERVER_ADDRESS": "foundry-resource.services.ai.azure.com",
+        "_SERVER_PORT": None,
+        "_route_agent_request_to_mock": object(),
+        "json": json,
+        "tracer": FakeTracer(),
+    }
+    module = ast.Module(body=[run_invoke_agent], type_ignores=[])
+    exec(compile(ast.fix_missing_locations(module), str(scenario_path), "exec"), namespace)
+    return namespace["run_invoke_agent"], spans
 
 
 def test_metric_specs_expose_recommended_agent_name():
@@ -239,6 +295,100 @@ def test_foundry_agent_reference_uses_agent_scoped_responses_client():
         isinstance(node, ast.Constant) and node.value == "agent_reference"
         for node in ast.walk(tree)
     )
+    assert not any(
+        isinstance(node, ast.Constant) and node.value == "gen_ai.response.finish_reasons"
+        for node in ast.walk(tree)
+    )
+
+
+def test_foundry_agent_reference_preserves_invocation_failure_when_cleanup_fails():
+    run_invoke_agent, spans = _load_foundry_run_invoke_agent()
+    invocation_error = RuntimeError("invocation failed")
+    conversation_cleanup_error = RuntimeError("conversation cleanup failed")
+    agent_cleanup_error = RuntimeError("agent cleanup failed")
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            raise invocation_error
+
+    class FakeConversations:
+        def create(self):
+            return SimpleNamespace(id="conversation-id")
+
+        def delete(self, **kwargs):
+            raise conversation_cleanup_error
+
+    class FakeOpenAIClient:
+        conversations = FakeConversations()
+        responses = FakeResponses()
+
+        def close(self):
+            pass
+
+    class FakeAgents:
+        def create_version(self, **kwargs):
+            return SimpleNamespace(id="agent-id", name="refimpl-test-agent", version="1")
+
+        def delete_version(self, **kwargs):
+            raise agent_cleanup_error
+
+    class FakeClient:
+        agents = FakeAgents()
+
+        def get_openai_client(self, **kwargs):
+            return FakeOpenAIClient()
+
+    with pytest.raises(ExceptionGroup) as caught:
+        run_invoke_agent(FakeClient())
+
+    raised_error = caught.value
+    assert raised_error.exceptions == (
+        invocation_error,
+        conversation_cleanup_error,
+        agent_cleanup_error,
+    )
+    assert spans["invoke_agent refimpl-test-agent"].status == ("error", "invocation failed")
+
+
+def test_foundry_agent_reference_raises_cleanup_only_failure():
+    run_invoke_agent, _ = _load_foundry_run_invoke_agent()
+    cleanup_error = RuntimeError("conversation cleanup failed")
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            return SimpleNamespace(id="response-id", output_text="", status="completed", usage=None)
+
+    class FakeConversations:
+        def create(self):
+            return SimpleNamespace(id="conversation-id")
+
+        def delete(self, **kwargs):
+            raise cleanup_error
+
+    class FakeOpenAIClient:
+        conversations = FakeConversations()
+        responses = FakeResponses()
+
+        def close(self):
+            pass
+
+    class FakeAgents:
+        def create_version(self, **kwargs):
+            return SimpleNamespace(id="agent-id", name="refimpl-test-agent", version="1")
+
+        def delete_version(self, **kwargs):
+            pass
+
+    class FakeClient:
+        agents = FakeAgents()
+
+        def get_openai_client(self, **kwargs):
+            return FakeOpenAIClient()
+
+    with pytest.raises(RuntimeError) as caught:
+        run_invoke_agent(FakeClient())
+
+    assert caught.value is cleanup_error
 
 
 if __name__ == "__main__":
@@ -253,4 +403,6 @@ if __name__ == "__main__":
     test_span_specs_are_named_as_the_registry_names_them()
     test_foundry_invoke_agent_refinement_contract()
     test_foundry_agent_reference_uses_agent_scoped_responses_client()
+    test_foundry_agent_reference_preserves_invocation_failure_when_cleanup_fails()
+    test_foundry_agent_reference_raises_cleanup_only_failure()
     print("ok")
