@@ -7,7 +7,7 @@
 | Attribute | Supporting Libraries |
 | --- | --- |
 | gen_ai.operation.name | [anthropic], [aws-bedrock], [azure-ai-inference], [cohere], [google-genai], [groq], [litellm], [mistralai], [openai], [vertexai] |
-| gen_ai.provider.name | [anthropic], [azure-ai-inference], [google-genai], [openai], [vertexai] |
+| gen_ai.provider.name | [anthropic], [google-genai], [openai], [vertexai] |
 
 ## Conditionally Required
 
@@ -22,7 +22,7 @@
 | gen_ai.request.seed | (none) |
 | gen_ai.request.stream | (none) |
 | gen_ai.request.top_k | (none) |
-| server.port | [anthropic], [openai] |
+| server.port | [anthropic], [azure-ai-inference], [openai] |
 
 ## Recommended
 
