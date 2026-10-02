@@ -101,6 +101,31 @@ def _load_foundry_run_invoke_agent():
     return namespace["run_invoke_agent"], spans
 
 
+def _run_foundry_program(client, run_invoke_agent, flush_and_shutdown):
+    scenario_path = _SEMCONV_ROOT / "reference" / "scenarios" / "azure-ai-foundry" / "scenario.py"
+    tree = ast.parse(scenario_path.read_text(encoding="utf-8"))
+    main_guard = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Compare)
+        and isinstance(node.test.left, ast.Name)
+        and node.test.left.id == "__name__"
+    )
+    namespace = {
+        "AIProjectClient": lambda **kwargs: client,
+        "FOUNDRY_PROJECT_ENDPOINT": "https://foundry-resource.services.ai.azure.com/api/projects/reference-project",
+        "MockCredential": lambda: object(),
+        "MockTransportPolicy": lambda: object(),
+        "SansIOHTTPPolicy": lambda: object(),
+        "flush_and_shutdown": flush_and_shutdown,
+        "run_invoke_agent": run_invoke_agent,
+        "setup_otel": lambda: ("tracer-provider", "logger-provider", "meter-provider"),
+    }
+    module = ast.Module(body=main_guard.body, type_ignores=[])
+    exec(compile(ast.fix_missing_locations(module), str(scenario_path), "exec"), namespace)
+
+
 def test_metric_specs_expose_recommended_agent_name():
     specs = metric_specs()
     assert specs, "expected at least one tracked metric"
@@ -391,6 +416,62 @@ def test_foundry_agent_reference_raises_cleanup_only_failure():
     assert caught.value is cleanup_error
 
 
+def test_foundry_program_preserves_run_failure_when_all_cleanup_fails():
+    events = []
+    run_error = RuntimeError("run failed")
+    close_error = RuntimeError("project client close failed")
+    shutdown_error = RuntimeError("telemetry shutdown failed")
+
+    class FakeClient:
+        def close(self):
+            events.append("client.close")
+            raise close_error
+
+    client = FakeClient()
+
+    def fail_run(actual_client):
+        assert actual_client is client
+        events.append("run_invoke_agent")
+        raise run_error
+
+    def fail_shutdown(tp, lp, mp):
+        assert (tp, lp, mp) == ("tracer-provider", "logger-provider", "meter-provider")
+        events.append("flush_and_shutdown")
+        raise shutdown_error
+
+    with pytest.raises(BaseExceptionGroup) as caught:
+        _run_foundry_program(client, fail_run, fail_shutdown)
+
+    assert caught.value.exceptions == (run_error, close_error, shutdown_error)
+    assert events == ["run_invoke_agent", "client.close", "flush_and_shutdown"]
+
+
+def test_foundry_program_attempts_shutdown_after_cleanup_only_base_exception():
+    events = []
+    close_error = KeyboardInterrupt("project client close interrupted")
+
+    class FakeClient:
+        def close(self):
+            events.append("client.close")
+            raise close_error
+
+    client = FakeClient()
+
+    def run_successfully(actual_client):
+        assert actual_client is client
+        events.append("run_invoke_agent")
+
+    def shutdown_successfully(tp, lp, mp):
+        assert (tp, lp, mp) == ("tracer-provider", "logger-provider", "meter-provider")
+        events.append("flush_and_shutdown")
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        _run_foundry_program(client, run_successfully, shutdown_successfully)
+
+    assert caught.value is close_error
+    assert events == ["run_invoke_agent", "client.close", "flush_and_shutdown"]
+
+
 if __name__ == "__main__":
     test_metric_specs_expose_recommended_agent_name()
     test_metric_specs_are_named_as_the_registry_names_them()
@@ -405,4 +486,6 @@ if __name__ == "__main__":
     test_foundry_agent_reference_uses_agent_scoped_responses_client()
     test_foundry_agent_reference_preserves_invocation_failure_when_cleanup_fails()
     test_foundry_agent_reference_raises_cleanup_only_failure()
+    test_foundry_program_preserves_run_failure_when_all_cleanup_fails()
+    test_foundry_program_attempts_shutdown_after_cleanup_only_base_exception()
     print("ok")

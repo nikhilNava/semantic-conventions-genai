@@ -253,8 +253,30 @@ if __name__ == "__main__":
         per_call_policies=[MockTransportPolicy()],
     )
 
+    primary_error = None
     try:
         run_invoke_agent(client)
-    finally:
+    except BaseException as error:  # noqa: BLE001
+        primary_error = error
+
+    cleanup_errors = []
+    try:
         client.close()
+    except BaseException as error:  # noqa: BLE001
+        cleanup_errors.append(error)
+    try:
         flush_and_shutdown(tp, lp, mp)
+    except BaseException as error:  # noqa: BLE001
+        cleanup_errors.append(error)
+
+    if primary_error is not None and cleanup_errors:
+        raise BaseExceptionGroup(
+            "Foundry scenario and cleanup failed",
+            [primary_error, *cleanup_errors],
+        ) from None
+    if len(cleanup_errors) == 1:
+        raise cleanup_errors[0]
+    if cleanup_errors:
+        raise BaseExceptionGroup("Foundry scenario cleanup failed", cleanup_errors)
+    if primary_error is not None:
+        raise primary_error
