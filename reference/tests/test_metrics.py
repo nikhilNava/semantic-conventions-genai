@@ -10,6 +10,7 @@ Runnable directly (``python tests/test_metrics.py``) or under pytest.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import yaml
@@ -32,6 +33,16 @@ def _required_level(attribute: dict) -> tuple[str, str | None]:
         return level, None
     name, condition = next(iter(level.items()))
     return name, condition
+
+
+def _attribute_path(node: ast.AST) -> tuple[str, ...]:
+    path = []
+    while isinstance(node, ast.Attribute):
+        path.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        path.append(node.id)
+    return tuple(reversed(path))
 
 
 def test_metric_specs_expose_recommended_agent_name():
@@ -170,6 +181,66 @@ def test_foundry_invoke_agent_refinement_contract():
     )
 
 
+def test_foundry_agent_reference_uses_agent_scoped_responses_client():
+    scenario_path = _SEMCONV_ROOT / "reference" / "scenarios" / "azure-ai-foundry" / "scenario.py"
+    tree = ast.parse(scenario_path.read_text(encoding="utf-8"))
+
+    assignments = {
+        target.id: node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+
+    agent_call = assignments["agent"]
+    assert isinstance(agent_call, ast.Call)
+    assert _attribute_path(agent_call.func) == ("client", "agents", "create_version")
+
+    openai_client_call = assignments["openai_client"]
+    assert isinstance(openai_client_call, ast.Call)
+    assert _attribute_path(openai_client_call.func) == ("client", "get_openai_client")
+    openai_client_arguments = {keyword.arg: keyword.value for keyword in openai_client_call.keywords}
+    assert ast.unparse(openai_client_arguments["agent_name"]) == "agent.name"
+
+    conversation_call = assignments["conversation"]
+    assert isinstance(conversation_call, ast.Call)
+    assert _attribute_path(conversation_call.func) == ("openai_client", "conversations", "create")
+
+    response_call = assignments["response"]
+    assert isinstance(response_call, ast.Call)
+    assert _attribute_path(response_call.func) == ("openai_client", "responses", "create")
+    response_arguments = {keyword.arg: keyword.value for keyword in response_call.keywords}
+    assert set(response_arguments) == {"conversation", "input"}
+    assert ast.unparse(response_arguments["conversation"]) == "conversation.id"
+    assert ast.unparse(response_arguments["input"]) == "USER_INPUT"
+
+    invoke_attributes = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Dict)
+        and any(
+            isinstance(key, ast.Constant)
+            and key.value == "gen_ai.operation.name"
+            and isinstance(value, ast.Constant)
+            and value.value == "invoke_agent"
+            for key, value in zip(node.keys, node.values, strict=True)
+        )
+    )
+    invoke_attribute_values = {
+        key.value: value
+        for key, value in zip(invoke_attributes.keys, invoke_attributes.values, strict=True)
+        if isinstance(key, ast.Constant) and isinstance(key.value, str)
+    }
+    assert ast.literal_eval(invoke_attribute_values["gen_ai.provider.name"]) == "azure.ai.foundry"
+    assert ast.unparse(invoke_attribute_values["gen_ai.agent.name"]) == "agent.name"
+    assert ast.unparse(invoke_attribute_values["gen_ai.conversation.id"]) == "conversation.id"
+    assert not any(
+        isinstance(node, ast.Constant) and node.value == "agent_reference"
+        for node in ast.walk(tree)
+    )
+
+
 if __name__ == "__main__":
     test_metric_specs_expose_recommended_agent_name()
     test_metric_specs_are_named_as_the_registry_names_them()
@@ -181,4 +252,5 @@ if __name__ == "__main__":
     test_span_types_absent_from_a_data_file_are_not_reported()
     test_span_specs_are_named_as_the_registry_names_them()
     test_foundry_invoke_agent_refinement_contract()
+    test_foundry_agent_reference_uses_agent_scoped_responses_client()
     print("ok")
