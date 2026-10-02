@@ -1,5 +1,5 @@
 runner: genai-conformance
-instrumented_library: microsoft-foundry-models
+instrumented_library: azure-ai-inference
 instrumentation_library: reference
 
 server:

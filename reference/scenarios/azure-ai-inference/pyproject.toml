@@ -1,10 +1,9 @@
 [project]
-name = "microsoft-foundry-models-reference-test"
+name = "azure-ai-inference-reference-test"
 version = "0.0.0"
 requires-python = ">=3.12"
 dependencies = [
-    "httpx2==2.13.1",
-    "openai==3.19.2",
+    "azure-ai-inference==1.0.0b9",
     "genai-reference-shared",
 ]
 

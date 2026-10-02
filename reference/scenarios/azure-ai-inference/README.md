@@ -1,11 +1,8 @@
 # azure-ai-inference
 
-The OpenAI client configured with a Microsoft Foundry Models endpoint is a
-**model-call boundary**. It calls the deployed model directly, so it owns
-inference and embeddings. The directory retains its historical name because
-the semantic convention provider value remains `azure.ai.inference`. Tool
-calling is supported, but the client returns tool calls without executing
-them.
+The `azure-ai-inference` client is a **model-call boundary**: it calls the model
+directly, so it owns inference and embeddings. Tool calling is supported, but
+the client returns tool calls without executing them.
 
 | Operation | Should be instrumented here | Status |
 | --- | --- | --- |
