@@ -117,12 +117,15 @@ def test_azure_ai_inference_refinement_targets_current_foundry_models_api():
 
 
 def test_foundry_models_reference_uses_supported_openai_sdk():
-    project_file = _REPO_ROOT / "reference" / "scenarios" / "azure-ai-inference" / "pyproject.toml"
+    scenario_directory = _REPO_ROOT / "reference" / "scenarios" / "azure-ai-inference"
+    project_file = scenario_directory / "pyproject.toml"
     project = tomllib.loads(project_file.read_text(encoding="utf-8"))
     dependencies = project["project"]["dependencies"]
+    conformance = (scenario_directory / "conformance.yaml").read_text(encoding="utf-8")
 
     assert "openai==3.19.2" in dependencies
     assert not any(dependency.startswith("azure-ai-inference==") for dependency in dependencies)
+    assert "instrumented_library: openai" in conformance
 
 
 if __name__ == "__main__":
