@@ -44,9 +44,9 @@ class WeatherAgentExecutor(AgentExecutor):
         await updater.cancel()
 
 
-def create_app(host: str, port: int) -> Starlette:
+def create_agent_card(host: str, port: int) -> AgentCard:
     rpc_url = "/a2a/jsonrpc"
-    agent_card = AgentCard(
+    return AgentCard(
         name="weather-agent",
         description="Returns weather information for a requested location.",
         version="1.0.0",
@@ -73,6 +73,11 @@ def create_app(host: str, port: int) -> Starlette:
             )
         ],
     )
+
+
+def create_app(host: str, port: int) -> Starlette:
+    rpc_url = "/a2a/jsonrpc"
+    agent_card = create_agent_card(host, port)
     request_handler = DefaultRequestHandler(
         agent_executor=WeatherAgentExecutor(),
         task_store=InMemoryTaskStore(),

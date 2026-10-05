@@ -61,13 +61,14 @@ When the library explicitly exposes the immediate logical caller, use the
 - `gen_ai.caller.type` identifies whether that caller is an agent or workflow.
 - `gen_ai.caller.name` identifies the immediate logical caller.
 
-For example, Google ADK's `RemoteA2aAgent` can discover a remote agent from its
-Agent Card and invoke it with the A2A protocol's `SendMessage` operation. When
-an ADK `Workflow` directly schedules a `RemoteA2aAgent`, the node execution
-context exposes both the parent workflow and the remote target. Instrumentation
-can propagate that per-invocation caller identity to the A2A request boundary.
-Similarly, when an agent invokes a `RemoteA2aAgent` through `AgentTool`, the
-tool context exposes the executing agent and configured remote target.
+For example, Google ADK's `RemoteA2aAgent` invokes an agent described by an
+Agent Card with the A2A protocol's `SendMessage` operation. A workflow step can
+call public `Context.run_node` with a `RemoteA2aAgent`. `Context.node`
+identifies the immediate workflow step, and the `run_node` argument identifies
+the target. When an agent invokes a `RemoteA2aAgent` through `AgentTool`,
+public `ToolContext.agent_name` identifies the executing agent and
+`AgentTool.agent` identifies the target. Instrumentation can carry those
+per-invocation values to the public A2A client request boundary.
 
 The local `RemoteA2aAgent` execution is an `invoke_agent` INTERNAL span, and the
 protocol request is its `invoke_agent` CLIENT child. The caller attributes
@@ -83,7 +84,7 @@ flowchart LR
   subgraph C["CALLER PROCESS"]
     C1["invoke_workflow weather_workflow [INTERNAL]<br/>workflow.name = weather_workflow"]
     C2["invoke_agent remote_weather_agent [INTERNAL]<br/>agent.name = remote_weather_agent"]
-    C3["invoke_agent weather-agent [CLIENT]<br/>agent.name = weather-agent<br/>caller.type = workflow<br/>caller.name = weather_workflow"]
+    C3["invoke_agent weather-agent [CLIENT]<br/>agent.name = weather-agent<br/>caller.type = workflow<br/>caller.name = invoke_remote_weather_agent"]
     C1 --> C2
     C2 --> C3
   end

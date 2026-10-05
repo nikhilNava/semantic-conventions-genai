@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import contextvars
 import json
 import os
 import pathlib
@@ -107,8 +108,8 @@ class A2ATopologyRecorder(SpanProcessor):
         elif operation_name == "invoke_agent" and span.kind == SpanKind.INTERNAL:
             agent_name = attributes.get("gen_ai.agent.name")
             if agent_name in {"workflow_remote_agent", "agent_remote_agent"}:
-                self.internal_spans[agent_name] = (
-                    span.context.span_id,
+                self.internal_spans[span.context.span_id] = (
+                    agent_name,
                     span.parent.span_id if span.parent else None,
                 )
         elif (
@@ -127,20 +128,25 @@ class A2ATopologyRecorder(SpanProcessor):
             raise AssertionError("Workflow span was not recorded")
         if self.routing_agent_span_id is None:
             raise AssertionError("Routing agent span was not recorded")
-        if set(self.internal_spans) != {"workflow_remote_agent", "agent_remote_agent"}:
-            raise AssertionError("Both RemoteA2aAgent INTERNAL spans were not recorded")
-        workflow_internal_id, workflow_internal_parent = self.internal_spans["workflow_remote_agent"]
-        if workflow_internal_parent != self.workflow_span_id:
-            raise AssertionError("Workflow RemoteA2aAgent span is not a child of the workflow span")
-        agent_internal_id, agent_internal_parent = self.internal_spans["agent_remote_agent"]
-        if agent_internal_parent != self.routing_agent_span_id:
-            raise AssertionError("AgentTool RemoteA2aAgent span is not a child of the routing agent span")
-        expected_calls = {
-            ("workflow", "weather_workflow"): workflow_internal_id,
-            ("agent", "routing_agent"): agent_internal_id,
+        expected_callers = {
+            ("workflow", "invoke_remote_weather_agent"),
+            ("workflow", "invoke_remote_forecast_agent"),
+            ("agent", "routing_agent"),
         }
-        if self.client_calls != expected_calls:
+        if set(self.client_calls) != expected_callers:
             raise AssertionError(f"A2A CLIENT callers were not correlated correctly: {self.client_calls}")
+        if len(self.internal_spans) != len(expected_callers):
+            raise AssertionError("Each A2A CLIENT call must have one RemoteA2aAgent INTERNAL parent")
+        for caller, internal_span_id in self.client_calls.items():
+            internal_span = self.internal_spans.get(internal_span_id)
+            if internal_span is None:
+                raise AssertionError(f"A2A CLIENT call {caller} has no RemoteA2aAgent INTERNAL parent")
+            agent_name, parent_span_id = internal_span
+            if caller[0] == "workflow":
+                if agent_name != "workflow_remote_agent" or parent_span_id != self.workflow_span_id:
+                    raise AssertionError(f"Workflow A2A call {caller} has the wrong span topology")
+            elif agent_name != "agent_remote_agent" or parent_span_id != self.routing_agent_span_id:
+                raise AssertionError(f"AgentTool A2A call {caller} has the wrong span topology")
 
     def shutdown(self):
         pass
@@ -151,11 +157,14 @@ class A2ATopologyRecorder(SpanProcessor):
 
 @contextlib.contextmanager
 def _run_a2a_server():
+    from a2a_server import create_agent_card
+
     host = "127.0.0.1"
     with socket.socket() as sock:
         sock.bind((host, 0))
         port = sock.getsockname()[1]
 
+    agent_card = create_agent_card(host, port)
     server_path = Path(__file__).with_name("a2a_server.py")
     process = subprocess.Popen(
         [sys.executable, str(server_path), "--host", host, "--port", str(port)],
@@ -175,7 +184,7 @@ def _run_a2a_server():
                 time.sleep(0.1)
         else:
             raise RuntimeError("A2A server did not become ready")
-        yield base_url
+        yield base_url, agent_card
     finally:
         if process.poll() is None:
             process.terminate()
@@ -642,33 +651,129 @@ def run_multi_agent_delegation_reference():
 
 def run_remote_a2a_agent_reference(topology_recorder):
     """Invoke a remote A2A agent from an ADK workflow and agent tool."""
+    import httpx
+    from a2a.client.client import ClientConfig
+    from a2a.client.client_factory import ClientFactory
     from a2a.helpers import get_message_text
-    from google.adk.a2a import _compat as adk_a2a_compat
     from google.adk.agents import Agent
-    from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH, RemoteA2aAgent
+    from google.adk.agents.context import Context
+    from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
     from google.adk.models.base_llm import BaseLlm
     from google.adk.models.llm_response import LlmResponse
     from google.adk.runners import Runner
     from google.adk.sessions import InMemorySessionService
     from google.adk.tools.agent_tool import AgentTool
-    from google.adk.workflow import START, Workflow
+    from google.adk.workflow import START, FunctionNode, Workflow
     from google.genai import types
 
     print("  [invoke_agent] workflow and agent callers -> A2A remote agent")
 
-    with _run_a2a_server() as server_url, _suppress_adk_native_telemetry():
+    with _run_a2a_server() as (_server_url, agent_card), _suppress_adk_native_telemetry():
+        request_barrier = asyncio.Barrier(3)
+        workflow_call_context = contextvars.ContextVar("workflow_a2a_call_context", default=None)
+
+        class _TracingClientFactory(ClientFactory):
+            def create(self, card, interceptors=None):
+                client = super().create(card, interceptors)
+                original_send_message = client.send_message
+
+                async def _traced_send_message(request, *, context=None):
+                    call_context = _otel_context.get_value(_A2A_CALL_CONTEXT_KEY)
+                    if call_context is None:
+                        raise RuntimeError("A2A request did not inherit its ADK caller context")
+                    await asyncio.wait_for(request_barrier.wait(), timeout=10)
+                    target_url = urlparse(card.supported_interfaces[0].url)
+                    client_attributes = {
+                        "gen_ai.operation.name": "invoke_agent",
+                        "gen_ai.agent.name": card.name,
+                        "gen_ai.agent.version": card.version,
+                        "gen_ai.caller.type": call_context["caller_type"],
+                        "gen_ai.caller.name": call_context["caller_name"],
+                        "server.address": target_url.hostname or "localhost",
+                        "server.port": target_url.port or 443,
+                    }
+                    if card.provider:
+                        client_attributes["gen_ai.provider.name"] = card.provider.organization
+                    with _reference_tracer.start_as_current_span(
+                        f"invoke_agent {card.name}",
+                        kind=SpanKind.CLIENT,
+                        attributes=client_attributes,
+                    ) as client_span:
+                        if card.description:
+                            client_span.set_attribute("gen_ai.agent.description", card.description)
+                        if request.message.context_id:
+                            client_span.set_attribute(
+                                "gen_ai.conversation.id",
+                                request.message.context_id,
+                            )
+                        input_text = get_message_text(request.message, delimiter=" ")
+                        if input_text:
+                            client_span.set_attribute(
+                                "gen_ai.input.messages",
+                                json.dumps(
+                                    [
+                                        {
+                                            "role": "user",
+                                            "parts": [{"type": "text", "content": input_text}],
+                                        }
+                                    ]
+                                ),
+                            )
+                        try:
+                            async for response in original_send_message(
+                                request,
+                                context=context,
+                            ):
+                                yield response
+                        except Exception as error:
+                            client_span.set_attribute("error.type", type(error).__qualname__)
+                            raise
+
+                client.send_message = _traced_send_message
+                return client
+
+        http_client = httpx.AsyncClient()
+        client_factory = _TracingClientFactory(ClientConfig(httpx_client=http_client))
         workflow_remote_agent = RemoteA2aAgent(
             name="workflow_remote_agent",
-            agent_card=f"{server_url}{AGENT_CARD_WELL_KNOWN_PATH}",
+            agent_card=agent_card,
+            a2a_client_factory=client_factory,
         )
         agent_remote_agent = RemoteA2aAgent(
             name="agent_remote_agent",
-            agent_card=f"{server_url}{AGENT_CARD_WELL_KNOWN_PATH}",
+            agent_card=agent_card,
+            a2a_client_factory=client_factory,
+        )
+
+        async def invoke_remote_weather_agent(ctx, node_input):
+            return await ctx.run_node(
+                workflow_remote_agent,
+                node_input=node_input,
+            )
+
+        async def invoke_remote_forecast_agent(ctx, node_input):
+            return await ctx.run_node(
+                workflow_remote_agent,
+                node_input=node_input,
+            )
+
+        weather_workflow_step = FunctionNode(
+            name="invoke_remote_weather_agent",
+            func=invoke_remote_weather_agent,
+            rerun_on_resume=True,
+        )
+        forecast_workflow_step = FunctionNode(
+            name="invoke_remote_forecast_agent",
+            func=invoke_remote_forecast_agent,
+            rerun_on_resume=True,
         )
         workflow = Workflow(
             name="weather_workflow",
             description="Invokes the remote weather agent.",
-            edges=[(START, workflow_remote_agent)],
+            edges=[
+                (START, weather_workflow_step),
+                (START, forecast_workflow_step),
+            ],
         )
         agent_tool = AgentTool(agent=agent_remote_agent)
 
@@ -717,103 +822,83 @@ def run_remote_a2a_agent_reference(topology_recorder):
             app_name="a2a_agent_app",
             session_service=agent_sessions,
         )
-        original_send_message = adk_a2a_compat.send_message
-        original_workflow_node_run = workflow_remote_agent._run_impl
-        original_workflow_remote_run = workflow_remote_agent._run_async_impl
-        original_agent_remote_run = agent_remote_agent._run_async_impl
-        original_agent_tool_run = agent_tool.run_async
-        request_barrier = asyncio.Barrier(2)
+        original_context_run_node = Context.run_node
+        original_remote_run = RemoteA2aAgent.run_async
+        original_agent_tool_run = AgentTool.run_async
 
-        async def _traced_send_message(client, *, request, request_metadata=None, context=None):
+        async def _traced_remote_run(self, parent_context):
+            if self.name not in {"workflow_remote_agent", "agent_remote_agent"}:
+                async for event in original_remote_run(self, parent_context):
+                    yield event
+                return
             call_context = _otel_context.get_value(_A2A_CALL_CONTEXT_KEY)
             if call_context is None:
-                raise RuntimeError("A2A request did not inherit its ADK caller context")
-            await asyncio.wait_for(request_barrier.wait(), timeout=10)
-            remote_agent = call_context["remote_agent"]
-            agent_card = remote_agent._agent_card
-            if agent_card is None:
-                raise RuntimeError("RemoteA2aAgent did not resolve its Agent Card")
-            target_url = urlparse(agent_card.supported_interfaces[0].url)
-            client_attributes = {
+                call_context = workflow_call_context.get()
+            if call_context is None:
+                raise RuntimeError(f"{self.name} did not inherit its ADK caller context")
+            agent_attributes = {
                 "gen_ai.operation.name": "invoke_agent",
-                "gen_ai.agent.name": agent_card.name,
-                "gen_ai.agent.version": agent_card.version,
-                "gen_ai.caller.type": call_context["caller_type"],
-                "gen_ai.caller.name": call_context["caller_name"],
-                "gen_ai.provider.name": agent_card.provider.organization,
-                "server.address": target_url.hostname or "localhost",
-                "server.port": target_url.port or 443,
+                "gen_ai.agent.name": self.name,
             }
             with _reference_tracer.start_as_current_span(
-                f"invoke_agent {agent_card.name}",
-                kind=SpanKind.CLIENT,
-                attributes=client_attributes,
-            ) as client_span:
-                if agent_card.description:
-                    client_span.set_attribute("gen_ai.agent.description", agent_card.description)
-                if request.context_id:
-                    client_span.set_attribute("gen_ai.conversation.id", request.context_id)
-                input_text = get_message_text(request, delimiter=" ")
-                if input_text:
-                    client_span.set_attribute(
-                        "gen_ai.input.messages",
-                        json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}]),
-                    )
+                f"invoke_agent {self.name}",
+                kind=SpanKind.INTERNAL,
+                attributes=agent_attributes,
+            ) as agent_span:
+                agent_span.set_attribute("gen_ai.conversation.id", parent_context.session.id)
+                token = _otel_context.attach(_otel_context.set_value(_A2A_CALL_CONTEXT_KEY, call_context))
                 try:
-                    async for response in original_send_message(
-                        client,
-                        request=request,
-                        request_metadata=request_metadata,
-                        context=context,
-                    ):
-                        yield response
-                except Exception as error:
-                    client_span.set_attribute("error.type", type(error).__qualname__)
-                    raise
-
-        def _traced_remote_run(remote_agent, original_remote_run):
-            async def _run(context):
-                agent_attributes = {
-                    "gen_ai.operation.name": "invoke_agent",
-                    "gen_ai.agent.name": remote_agent.name,
-                }
-                with _reference_tracer.start_as_current_span(
-                    f"invoke_agent {remote_agent.name}",
-                    kind=SpanKind.INTERNAL,
-                    attributes=agent_attributes,
-                ) as agent_span:
-                    agent_span.set_attribute("gen_ai.conversation.id", context.session.id)
-                    async for event in original_remote_run(context):
+                    async for event in original_remote_run(self, parent_context):
                         yield event
+                finally:
+                    _otel_context.detach(token)
 
-            return _run
-
-        async def _traced_workflow_node_run(*, ctx, node_input):
-            caller = ctx.parent_ctx.node if ctx.parent_ctx else None
-            if caller is not workflow:
-                raise AssertionError("Workflow routing did not expose the immediate caller node")
+        async def _traced_workflow_run_node(self, node, node_input=None, **kwargs):
+            if node is not workflow_remote_agent:
+                return await original_context_run_node(
+                    self,
+                    node,
+                    node_input=node_input,
+                    **kwargs,
+                )
+            caller = self.node
+            if caller is None:
+                raise RuntimeError("Workflow context did not expose its current node")
             call_context = {
                 "caller_type": "workflow",
                 "caller_name": caller.name,
-                "remote_agent": workflow_remote_agent,
+                "remote_agent": node,
             }
-            token = _otel_context.attach(_otel_context.set_value(_A2A_CALL_CONTEXT_KEY, call_context))
+            token = workflow_call_context.set(call_context)
             try:
-                async for event in original_workflow_node_run(ctx=ctx, node_input=node_input):
-                    yield event
+                return await original_context_run_node(
+                    self,
+                    node,
+                    node_input=node_input,
+                    **kwargs,
+                )
             finally:
-                _otel_context.detach(token)
+                workflow_call_context.reset(token)
 
-        async def _traced_agent_tool_run(*, args, tool_context):
-            caller = tool_context._invocation_context.agent
+        async def _traced_agent_tool_run(self, *, args, tool_context):
+            if self is not agent_tool:
+                return await original_agent_tool_run(
+                    self,
+                    args=args,
+                    tool_context=tool_context,
+                )
             call_context = {
                 "caller_type": "agent",
-                "caller_name": caller.name,
-                "remote_agent": agent_remote_agent,
+                "caller_name": tool_context.agent_name,
+                "remote_agent": self.agent,
             }
             token = _otel_context.attach(_otel_context.set_value(_A2A_CALL_CONTEXT_KEY, call_context))
             try:
-                return await original_agent_tool_run(args=args, tool_context=tool_context)
+                return await original_agent_tool_run(
+                    self,
+                    args=args,
+                    tool_context=tool_context,
+                )
             finally:
                 _otel_context.detach(token)
 
@@ -885,23 +970,18 @@ def run_remote_a2a_agent_reference(topology_recorder):
             try:
                 await asyncio.gather(_invoke_workflow(), _invoke_agent())
             finally:
-                await workflow_remote_agent.cleanup()
-                await agent_remote_agent.cleanup()
+                try:
+                    await workflow_remote_agent.cleanup()
+                finally:
+                    try:
+                        await agent_remote_agent.cleanup()
+                    finally:
+                        await http_client.aclose()
 
         with (
-            _patched_method(workflow_remote_agent, "_run_impl", _traced_workflow_node_run),
-            _patched_method(
-                workflow_remote_agent,
-                "_run_async_impl",
-                _traced_remote_run(workflow_remote_agent, original_workflow_remote_run),
-            ),
-            _patched_method(
-                agent_remote_agent,
-                "_run_async_impl",
-                _traced_remote_run(agent_remote_agent, original_agent_remote_run),
-            ),
-            _patched_method(agent_tool, "run_async", _traced_agent_tool_run),
-            _patched_method(adk_a2a_compat, "send_message", _traced_send_message),
+            _patched_method(Context, "run_node", _traced_workflow_run_node),
+            _patched_method(RemoteA2aAgent, "run_async", _traced_remote_run),
+            _patched_method(AgentTool, "run_async", _traced_agent_tool_run),
         ):
             asyncio.run(_run())
         topology_recorder.assert_valid()

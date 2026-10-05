@@ -616,7 +616,7 @@ def test_committed_google_adk_remote_agent_covers_internal_and_client_spans():
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in invoke_agent_client)
 
 
-def test_google_adk_remote_agent_uses_per_invocation_caller_state():
+def test_google_adk_remote_agent_uses_public_per_invocation_caller_state():
     path = Path(__file__).parents[1] / "scenarios" / "google-adk" / "scenario.py"
     scenario = path.read_text(encoding="utf-8")
 
@@ -626,14 +626,21 @@ def test_google_adk_remote_agent_uses_per_invocation_caller_state():
     assert 'routing_model = _AgentToolModel(model="reference-agent-tool-model")' in scenario
     assert "model=routing_model" in scenario
     assert 'name="weather_workflow"' in scenario
-    assert "edges=[(START, workflow_remote_agent)]" in scenario
-    assert "ctx.parent_ctx.node" in scenario
-    assert "tool_context._invocation_context.agent" in scenario
+    assert "FunctionNode(" in scenario
+    assert "await ctx.run_node(" in scenario
+    assert "caller = self.node" in scenario
+    assert "tool_context.agent_name" in scenario
+    assert '"remote_agent": self.agent' in scenario
+    assert "class _TracingClientFactory(ClientFactory)" in scenario
+    assert "client.send_message" in scenario
     assert "_A2A_CALL_CONTEXT_KEY" in scenario
     assert "_otel_context.attach(" in scenario
     assert "_otel_context.detach(" in scenario
     assert "_otel_context.get_value(_A2A_CALL_CONTEXT_KEY)" in scenario
-    assert "request_barrier = asyncio.Barrier(2)" in scenario
+    assert 'contextvars.ContextVar("workflow_a2a_call_context"' in scenario
+    assert "workflow_call_context.set(call_context)" in scenario
+    assert "workflow_call_context.reset(token)" in scenario
+    assert "request_barrier = asyncio.Barrier(3)" in scenario
     assert "await asyncio.wait_for(request_barrier.wait(), timeout=10)" in scenario
     assert "asyncio.gather(" in scenario
     assert "remote_agent.parent_agent" not in scenario
@@ -641,11 +648,20 @@ def test_google_adk_remote_agent_uses_per_invocation_caller_state():
     assert '"gen_ai.caller.name": call_context["caller_name"]' in scenario
     assert 'attributes.get("gen_ai.caller.type")' in scenario
     assert 'attributes.get("gen_ai.caller.name")' in scenario
-    assert '("workflow", "weather_workflow")' in scenario
+    assert '("workflow", "invoke_remote_weather_agent")' in scenario
+    assert '("workflow", "invoke_remote_forecast_agent")' in scenario
     assert '("agent", "routing_agent")' in scenario
-    assert "self.client_calls != expected_calls" in scenario
+    assert "set(self.client_calls) != expected_callers" in scenario
     assert 'attribute.startswith("gen_ai.caller.")' not in scenario
     assert 'f"invoke_workflow {workflow.name}"' in scenario
+    assert "ctx.parent_ctx.node" not in scenario
+    assert "tool_context._invocation_context" not in scenario
+    assert "._custom_metadata" not in scenario
+    assert "._telemetry_context" not in scenario
+    assert "remote_agent._agent_card" not in scenario
+    assert "adk_a2a_compat" not in scenario
+    assert '"_run_impl"' not in scenario
+    assert '"_run_async_impl"' not in scenario
 
 
 def test_execute_tool_transfer_report_links_to_agent_as_tool():
@@ -683,7 +699,7 @@ def test_google_adk_remote_client_records_available_version_and_errors():
     path = Path(__file__).parents[1] / "scenarios" / "google-adk" / "scenario.py"
     scenario = path.read_text(encoding="utf-8")
 
-    assert '"gen_ai.agent.version": agent_card.version' in scenario
+    assert '"gen_ai.agent.version": card.version' in scenario
     assert 'client_span.set_attribute("error.type", type(error).__qualname__)' in scenario
 
 
@@ -764,7 +780,7 @@ if __name__ == "__main__":
     test_invoke_agent_client_does_not_duplicate_transfer_target()
     test_invoke_agent_caller_is_a_span_refinement()
     test_committed_google_adk_remote_agent_covers_internal_and_client_spans()
-    test_google_adk_remote_agent_uses_per_invocation_caller_state()
+    test_google_adk_remote_agent_uses_public_per_invocation_caller_state()
     test_google_adk_remote_client_records_available_version_and_errors()
     test_langchain_transfer_graph_runs_under_workflow_span()
     test_committed_transfer_scenarios_emit_transfer_attributes()
