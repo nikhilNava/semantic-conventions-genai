@@ -1138,13 +1138,12 @@ are encouraged to follow this semantic convention for tools invoked by their
 own code and to manually instrument any tool calls that automatic
 instrumentations do not cover.
 
-Some tool calls have specialized semantic conventions, including
+When the library API or state identifies a specialized tool call,
+instrumentation SHOULD apply the corresponding
+[refinement](gen-ai-agent-spans.md#execute-tool-span) to the execute-tool
+span. Available refinements include
 [agents exposed as tools](gen-ai-agent-spans.md#agent-as-a-tool) and
-[Agent Skills](https://agentskills.io). Instrumentations SHOULD use the
-instrumented library API or state to identify an applicable
-[refinement](gen-ai-agent-spans.md#execute-tool-span), apply it instead of
-the generic execute-tool span contract, and SHOULD NOT record two
-different spans for one call.
+[Agent Skills](https://agentskills.io).
 
 **Span name** SHOULD be `execute_tool {gen_ai.tool.name}`.
 

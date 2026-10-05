@@ -26,6 +26,7 @@
       "server.port"
     ],
     "gen_ai.invoke_agent.internal": [
+      "gen_ai.agent.description",
       "gen_ai.agent.name",
       "gen_ai.conversation.id",
       "gen_ai.input.messages",

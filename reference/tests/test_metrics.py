@@ -94,25 +94,24 @@ def test_execute_tool_transfer_is_a_span_refinement():
 
     transfer = refinements.split("- id: gen_ai.execute_tool.transfer.internal", 1)[1]
 
-    assert "instrumented library API or state" in execute_tool
+    assert "When the library API or state identifies a specialized tool call" in execute_tool
     assert "[refinement](gen-ai-agent-spans.md#execute-tool-span)" in execute_tool
-    assert "SHOULD NOT record two" in execute_tool
-    assert "different spans for one call" in execute_tool
+    assert "corresponding" in execute_tool
+    assert "SHOULD NOT record two" not in execute_tool
 
     assert "ref: gen_ai.execute_tool.internal" in transfer
     assert "execute_tool {gen_ai.tool.name} {gen_ai.transfer.target.name}" in transfer
     assert "including when the transfer attempt fails" in transfer
-    assert "MUST NOT be" in transfer
-    assert "used for transfers that are not tool executions" in transfer
-    assert "does not produce an additional span" in transfer
+    assert "Transfers exposed through other operations use the corresponding span" in transfer
+    assert "MUST NOT" not in transfer
+    assert "One tool call produces one span" in transfer
 
-    for attribute in (
-        "gen_ai.transfer.mode",
-        "gen_ai.transfer.target.name",
-    ):
+    for attribute in ("gen_ai.transfer.mode", "gen_ai.transfer.target.name"):
         assert f"- ref: {attribute}" not in execute_tool
         assert f"- ref: {attribute}" in transfer
-        assert "sampling_relevant" not in _attribute_block(transfer, attribute)
+
+    assert "sampling_relevant" not in _attribute_block(transfer, "gen_ai.transfer.mode")
+    assert "sampling_relevant: true" in _attribute_block(transfer, "gen_ai.transfer.target.name")
 
 
 def test_invoke_agent_client_owns_caller_attributes_without_refinement():
@@ -662,6 +661,16 @@ def test_execute_tool_transfer_report_links_to_agent_as_tool():
     assert '"execute_tool_transfer": "../../docs/gen-ai/gen-ai-agent-spans.md#agent-as-a-tool"' in report_source
 
 
+def test_reference_tests_run_in_ci():
+    repository_root = Path(__file__).parents[2]
+    workflow = (repository_root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    reference_lint = workflow.split("  reference-python-lint:", 1)[1].split("  reference-scenario-matrix:", 1)[0]
+
+    assert "ruff check src scenarios tests" in reference_lint
+    assert "ruff format --check src scenarios tests" in reference_lint
+    assert "uv run --frozen --extra dev pytest tests/test_metrics.py" in reference_lint
+
+
 def test_caller_and_transfer_guidance_is_positive_and_scoped():
     model_dir = Path(__file__).parents[2] / "model" / "gen-ai"
     registry = (model_dir / "registry.yaml").read_text(encoding="utf-8")
@@ -679,11 +688,38 @@ def test_caller_and_transfer_guidance_is_positive_and_scoped():
     transfer = spans.split("- id: gen_ai.execute_tool.transfer.internal", 1)[1].split(
         "- id: gen_ai.execute_tool.load_skill.internal", 1
     )[0]
+    invoke_agent_client = spans.split("- type: gen_ai.invoke_agent.client", 1)[1].split(
+        "- type: gen_ai.invoke_agent.internal", 1
+    )[0]
+    execute_tool = spans.split("- type: gen_ai.execute_tool.internal", 1)[1].split(
+        "- type: gen_ai.invoke_workflow.internal", 1
+    )[0]
+    examples = (
+        Path(__file__).parents[2] / "docs" / "gen-ai" / "non-normative" / "examples-agent-interactions.md"
+    ).read_text(encoding="utf-8")
+    changelog = (Path(__file__).parents[2] / "changelog.d" / "447.enhancement.md").read_text(encoding="utf-8")
+
     assert "instead" in transfer
     assert "of the generic execute-tool span contract" in transfer
     assert "including when the transfer attempt fails" in transfer
     assert "remote agent invocation rather than a tool execution" not in transfer
     assert "dedicated in-process non-tool transfer" not in transfer
+    assert "Record `gen_ai.caller.*` when" in invoke_agent_client
+    assert "SHOULD NOT infer" not in invoke_agent_client
+    assert "When the library API or state identifies a specialized tool call" in execute_tool
+    assert "SHOULD NOT record two different spans" not in execute_tool
+    assert examples.startswith("# Agent tool transfer and remote invocation examples")
+    assert "Agent-to-agent" not in examples
+    assert "prescribe a particular context-propagation mechanism" not in examples
+    assert changelog.startswith("Define `gen_ai.execute_tool.transfer.internal` for agent tool transfers.")
+
+
+def test_google_adk_delegation_records_available_agent_descriptions():
+    path = Path(__file__).parents[1] / "scenarios" / "google-adk" / "scenario.py"
+    scenario = path.read_text(encoding="utf-8")
+
+    assert '"gen_ai.agent.description": specialist.description' in scenario
+    assert '"gen_ai.agent.description": root_agent.description' in scenario
 
 
 def test_google_adk_remote_client_records_available_version_and_errors():

@@ -587,6 +587,7 @@ def run_multi_agent_delegation_reference():
                     "gen_ai.operation.name": "invoke_agent",
                     "gen_ai.request.model": request_model,
                     "gen_ai.agent.name": specialist.name,
+                    "gen_ai.agent.description": specialist.description,
                 }
                 with _reference_tracer.start_as_current_span(
                     f"invoke_agent {specialist.name}", attributes=sub_agent_span_attributes
@@ -615,6 +616,7 @@ def run_multi_agent_delegation_reference():
                 "gen_ai.operation.name": "invoke_agent",
                 "gen_ai.request.model": request_model,
                 "gen_ai.agent.name": root_agent.name,
+                "gen_ai.agent.description": root_agent.description,
             }
             with _reference_tracer.start_as_current_span(
                 "invoke_agent root_agent", attributes=agent_span_attributes

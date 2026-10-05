@@ -202,13 +202,10 @@ The `gen_ai.operation.name` SHOULD be `invoke_agent`.
 
 Examples: OpenAI Assistants API, AWS Bedrock Agents.
 
-When the instrumented library or protocol explicitly exposes the
-immediate logical caller as an agent or workflow, `gen_ai.caller.*`
-identifies that caller. Instrumentations SHOULD NOT infer the caller from
-span hierarchy, names, timing, or application conventions.
-
-The presence of caller information does not imply a transfer of control,
-so `gen_ai.transfer.*` is not recorded on this span.
+Record `gen_ai.caller.*` when the instrumented library or protocol
+exposes the immediate logical caller as an agent or workflow. These
+attributes provide logical caller attribution. Transfer semantics are
+recorded with `gen_ai.transfer.*` on applicable transfer refinements.
 
 **Span name** SHOULD be `invoke_agent {gen_ai.agent.name}` if `gen_ai.agent.name` is readily available.
 When `gen_ai.agent.name` is not available, it SHOULD be `invoke_agent`.
@@ -1112,10 +1109,11 @@ refinements below.
 
 Describes a tool call that transfers work or control to another agent.
 
-This refinement applies when the instrumented framework or protocol
-explicitly exposes a tool call as a transfer and SHOULD be used instead
-of the generic execute-tool span contract for that call. It MUST NOT be
-used for transfers that are not tool executions.
+This refinement applies to tool calls that the instrumented framework or
+protocol explicitly identifies as agent transfers. Instrumentation SHOULD
+use this refinement instead of the generic execute-tool span contract.
+Transfers exposed through other operations use the corresponding span
+convention.
 
 Examples include:
 
@@ -1131,8 +1129,8 @@ for a result and resumes or passes control to the target agent.
 `gen_ai.transfer.target.name` identifies the target agent.
 `gen_ai.agent.*` continues to identify the agent executing the tool.
 
-Applying this refinement changes the semantic contract of the existing
-execute-tool span and does not produce an additional span.
+Applying this refinement updates the semantic contract of the existing
+execute-tool span. One tool call produces one span.
 
 **Span name** SHOULD be
 `execute_tool {gen_ai.tool.name} {gen_ai.transfer.target.name}` when
@@ -1243,6 +1241,7 @@ and SHOULD be provided **at span creation time** (if provided at all):
 * [`gen_ai.operation.name`](/docs/registry/attributes/gen-ai.md)
 * [`gen_ai.tool.name`](/docs/registry/attributes/gen-ai.md)
 * [`gen_ai.tool.type`](/docs/registry/attributes/gen-ai.md)
+* [`gen_ai.transfer.target.name`](/docs/registry/attributes/gen-ai.md)
 
 ---
 

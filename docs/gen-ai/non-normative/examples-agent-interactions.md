@@ -1,7 +1,7 @@
-# Agent-to-agent interaction examples
+# Agent tool transfer and remote invocation examples
 
-This page illustrates how existing GenAI spans represent agent-to-agent
-interactions. These examples are non-normative.
+This page illustrates agent tool transfers and remote agent invocations with
+existing GenAI spans. These examples are non-normative.
 
 ## Tool-based transfer
 
@@ -60,23 +60,19 @@ caller attributes on that span:
 - `gen_ai.caller.type` identifies whether that caller is an agent or workflow.
 - `gen_ai.caller.name` identifies the immediate logical caller.
 
-For example, Google ADK's `RemoteA2aAgent` invokes an agent described by an
-Agent Card with the A2A protocol's `SendMessage` operation. A workflow step can
-call public `Context.run_node` with a `RemoteA2aAgent`. `Context.node`
-identifies the immediate workflow step, and the `run_node` argument identifies
-the target. When an agent invokes a `RemoteA2aAgent` through `AgentTool`,
-public `ToolContext.agent_name` identifies the executing agent and
-`AgentTool.agent` identifies the target. Instrumentation can carry those
-per-invocation values to the public A2A client request boundary.
+Google ADK exposes the immediate caller before a `RemoteA2aAgent` sends its A2A
+request. `Context.node` identifies a workflow step, while
+`ToolContext.agent_name` identifies an agent using `AgentTool`. Framework
+instrumentation can carry that caller to the A2A CLIENT span.
 
 The local `RemoteA2aAgent` execution is an `invoke_agent` INTERNAL span, and the
 protocol request is its `invoke_agent` CLIENT child. The caller attributes
-describe the logical workflow caller rather than duplicating the immediate
-parent span.
+preserve the logical workflow caller on the client request, while the parent
+span represents the local `RemoteA2aAgent` execution.
 
-The target process can independently record the agent's execution as an
-`invoke_agent` INTERNAL span. When trace context is propagated, that execution
-can be a descendant of the CLIENT span.
+The target process can record the agent's execution as an `invoke_agent`
+INTERNAL span. Propagated trace context links that execution as a descendant of
+the CLIENT span.
 
 ```mermaid
 flowchart LR
@@ -92,6 +88,3 @@ flowchart LR
   end
   C3 --> T1
 ```
-
-These conventions do not require the target execution span or prescribe a
-particular context-propagation mechanism.
