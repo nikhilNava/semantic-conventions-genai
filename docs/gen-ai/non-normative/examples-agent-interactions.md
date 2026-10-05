@@ -1,7 +1,15 @@
-# Agent tool transfer and remote invocation examples
+# Tracking agent-to-agent interactions
 
-This page illustrates agent tool transfers and remote agent invocations with
-existing GenAI spans. These examples are non-normative.
+Agent-to-agent interactions appear at different runtime boundaries. Use the
+`gen_ai.execute_tool.transfer.internal` refinement when a framework exposes the
+target agent through a tool or handoff. Use a `gen_ai.invoke_agent.client` span
+when instrumentation observes a remote agent API or protocol call.
+
+These spans are not competing representations of the same operation. Record
+both only when they describe distinct boundaries, such as an agent tool that
+calls a separately instrumented remote agent client. The examples below show
+how to identify the caller and target at each boundary. These examples are
+non-normative.
 
 ## Tool-based transfer
 
