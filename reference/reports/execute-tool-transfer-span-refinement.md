@@ -8,7 +8,6 @@
 | --- | --- |
 | gen_ai.transfer.mode | [google-adk], [langchain], [openai-agents] |
 | gen_ai.transfer.target.name | [google-adk], [langchain], [openai-agents] |
-| gen_ai.transfer.target.type | [google-adk], [openai-agents] |
 
 [google-adk]: ../scenarios/google-adk/scenario.py
 [langchain]: ../scenarios/langchain/scenario.py

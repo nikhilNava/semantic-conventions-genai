@@ -525,23 +525,11 @@ attributes:
     stability: development
   - key: gen_ai.transfer.target.name
     type: string
-    brief: The human-readable name of the transfer target.
+    brief: The human-readable name of the agent targeted by the transfer.
     note: |
-      Instrumentations SHOULD record this attribute when the transfer target
-      name is readily available from the instrumented library API or state.
+      Instrumentations SHOULD record this attribute when the target agent name
+      is readily available from the instrumented library API or state.
     examples: ["weather_agent"]
-    stability: development
-  - key: gen_ai.transfer.target.type
-    type:
-      members:
-        - id: agent
-          value: "agent"
-          brief: A GenAI agent.
-          stability: development
-    brief: The type of the transfer target.
-    note: |
-      Instrumentations SHOULD record this attribute when the transfer target
-      type is readily available from the instrumented library API or state.
     stability: development
   - key: gen_ai.main_agent.id
     type: string

@@ -187,7 +187,6 @@ def span_refinement_specs() -> dict[str, SpanRefinementSpec]:
             conditionally_required=(
                 "gen_ai.transfer.mode",
                 "gen_ai.transfer.target.name",
-                "gen_ai.transfer.target.type",
             ),
             recommended=(),
             opt_in=(),

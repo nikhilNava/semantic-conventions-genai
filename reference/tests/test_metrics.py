@@ -36,7 +36,6 @@ _TRANSFER_ATTRIBUTES = {
     "gen_ai.transfer.mode",
     "gen_ai.transfer.target.name",
 }
-_TRANSFER_TARGET_TYPE = "gen_ai.transfer.target.type"
 _CALLER_ATTRIBUTES = {
     "gen_ai.caller.type",
     "gen_ai.caller.name",
@@ -109,7 +108,6 @@ def test_execute_tool_transfer_is_a_span_refinement():
 
     for attribute in (
         "gen_ai.transfer.mode",
-        _TRANSFER_TARGET_TYPE,
         "gen_ai.transfer.target.name",
     ):
         assert f"- ref: {attribute}" not in execute_tool
@@ -204,7 +202,22 @@ def test_generated_base_span_docs_exclude_refinement_only_attributes():
     assert "gen_ai.transfer.target.type" not in execute_tool_base
     assert "gen_ai.transfer.mode" in transfer_refinement
     assert "gen_ai.transfer.target.name" in transfer_refinement
-    assert "gen_ai.transfer.target.type" in transfer_refinement
+    assert "gen_ai.transfer.target.type" not in transfer_refinement
+
+
+def test_transfer_refinement_names_agent_target_without_redundant_type():
+    repository_root = Path(__file__).parents[2]
+    registry = (repository_root / "model" / "gen-ai" / "registry.yaml").read_text(encoding="utf-8")
+    spans = (repository_root / "model" / "gen-ai" / "spans.yaml").read_text(encoding="utf-8")
+    examples = (repository_root / "docs" / "gen-ai" / "non-normative" / "examples-agent-interactions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "gen_ai.transfer.target.type" not in registry
+    assert "gen_ai.transfer.target.type" not in spans
+    assert "`gen_ai.transfer.target.name` identifies the target agent." in examples
+    assert "gen_ai.transfer.target.type" not in examples
+    assert "transfer.target.type" not in examples
 
 
 def test_committed_refinement_reports_preserve_reference_coverage():
@@ -217,7 +230,7 @@ def test_committed_refinement_reports_preserve_reference_coverage():
     assert "| gen_ai.caller.name | [google-adk] |" in caller
     assert "| gen_ai.transfer.mode | [google-adk], [langchain], [openai-agents] |" in transfer
     assert "| gen_ai.transfer.target.name | [google-adk], [langchain], [openai-agents] |" in transfer
-    assert "| gen_ai.transfer.target.type | [google-adk], [openai-agents] |" in transfer
+    assert "gen_ai.transfer.target.type" not in transfer
     assert readme.index("[Execute Tool Transfer](reports/execute-tool-transfer-span-refinement.md)") < readme.index(
         "[Invoke Agent Caller](reports/invoke-agent-caller-client-span-refinement.md)"
     )
@@ -386,7 +399,6 @@ def test_collect_span_refinement_coverage_uses_discriminators(tmp_path):
                     "gen_ai.operation.name": "execute_tool",
                     "gen_ai.transfer.mode": "return_to_caller",
                     "gen_ai.transfer.target.name": "weather_agent",
-                    "gen_ai.transfer.target.type": "agent",
                 },
             ),
             _raw_span(
@@ -404,7 +416,6 @@ def test_collect_span_refinement_coverage_uses_discriminators(tmp_path):
         "gen_ai.execute_tool.transfer.internal": [
             "gen_ai.transfer.mode",
             "gen_ai.transfer.target.name",
-            "gen_ai.transfer.target.type",
         ],
         "gen_ai.invoke_agent.caller.client": [
             "gen_ai.caller.name",
@@ -720,9 +731,9 @@ def test_committed_transfer_scenarios_emit_transfer_attributes():
     scenarios_dir = Path(__file__).parents[1] / "scenarios"
 
     expected_attributes = {
-        "google-adk": _TRANSFER_ATTRIBUTES | {_TRANSFER_TARGET_TYPE},
+        "google-adk": _TRANSFER_ATTRIBUTES,
         "langchain": _TRANSFER_ATTRIBUTES,
-        "openai-agents": _TRANSFER_ATTRIBUTES | {_TRANSFER_TARGET_TYPE},
+        "openai-agents": _TRANSFER_ATTRIBUTES,
     }
 
     for library, expected in expected_attributes.items():
@@ -733,7 +744,7 @@ def test_committed_transfer_scenarios_emit_transfer_attributes():
         for attribute in expected:
             assert attribute in transfer_refinement, (library, attribute)
             assert attribute not in execute_tool, (library, attribute)
-        assert (_TRANSFER_TARGET_TYPE in transfer_refinement) is (_TRANSFER_TARGET_TYPE in expected), library
+        assert "gen_ai.transfer.target.type" not in transfer_refinement, library
 
         invoke_agent_internal = data["spans"].get("gen_ai.invoke_agent.internal", [])
         assert not any(attribute.startswith("gen_ai.transfer.") for attribute in invoke_agent_internal), library

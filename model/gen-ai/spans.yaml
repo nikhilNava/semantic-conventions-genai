@@ -933,7 +933,7 @@ span_refinements:
         has low cardinality. Otherwise, it SHOULD be
         `execute_tool {gen_ai.tool.name}`.
     brief: >
-      Describes a tool call that transfers work or control to another target.
+      Describes a tool call that transfers work or control to another agent.
     note: |
       This refinement applies when the instrumented framework or protocol
       explicitly exposes a tool call as a transfer and SHOULD be used instead
@@ -950,9 +950,9 @@ span_refinements:
         created from another agent.
 
       `gen_ai.transfer.mode` records whether the agent executing the tool waits
-      for a result and resumes or passes control to the target.
-      `gen_ai.transfer.target.*` identifies that target. `gen_ai.agent.*`
-      continues to identify the agent executing the tool.
+      for a result and resumes or passes control to the target agent.
+      `gen_ai.transfer.target.name` identifies the target agent.
+      `gen_ai.agent.*` continues to identify the agent executing the tool.
 
       Applying this refinement changes the semantic contract of the existing
       execute-tool span and does not produce an additional span.
@@ -961,9 +961,6 @@ span_refinements:
       - ref: gen_ai.transfer.mode
         requirement_level:
           conditionally_required: When the instrumented framework or protocol explicitly exposes the tool call as a transfer, including when the transfer attempt fails.
-      - ref: gen_ai.transfer.target.type
-        requirement_level:
-          conditionally_required: When `gen_ai.transfer.mode` is present and the target type is known, including when the transfer attempt fails.
       - ref: gen_ai.transfer.target.name
         requirement_level:
           conditionally_required: When `gen_ai.transfer.mode` is present and the target name is available, including when the transfer attempt fails.

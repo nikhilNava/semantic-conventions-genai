@@ -11,7 +11,7 @@ execution using the `gen_ai.execute_tool.transfer.internal`
 of the generic `gen_ai.execute_tool.internal` span:
 
 - `gen_ai.agent.*` identifies the source agent executing the tool.
-- `gen_ai.transfer.target.*` identifies the target agent.
+- `gen_ai.transfer.target.name` identifies the target agent.
 - `gen_ai.transfer.mode` describes whether control returns to the source agent
   or passes to the target.
 
@@ -30,7 +30,7 @@ flowchart LR
     direction LR
     subgraph S["SOURCE AGENT"]
       S1["invoke_agent source [INTERNAL]"]
-      S2["execute_tool transfer_to_weather_agent weather_agent [INTERNAL]<br/>agent.name = source<br/>transfer.mode = return_to_caller<br/>transfer.target.type = agent<br/>transfer.target.name = weather_agent"]
+      S2["execute_tool transfer_to_weather_agent weather_agent [INTERNAL]<br/>agent.name = source<br/>transfer.mode = return_to_caller<br/>transfer.target.name = weather_agent"]
       S1 --> S2
     end
     subgraph T["TARGET AGENT"]
@@ -49,7 +49,6 @@ For a transfer that does not return control to the source agent, the
 | `gen_ai.agent.name` | `"source"` |
 | `gen_ai.transfer.mode` | `"pass_control"` |
 | `gen_ai.transfer.target.name` | `"weather_agent"` |
-| `gen_ai.transfer.target.type` | `"agent"` |
 
 ## Agent invocation through an API or protocol
 

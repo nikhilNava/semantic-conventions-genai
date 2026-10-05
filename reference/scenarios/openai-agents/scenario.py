@@ -178,13 +178,11 @@ async def run_agent_as_tool_delegation():
             "gen_ai.agent.name": caller.name,
             "gen_ai.transfer.mode": "return_to_caller",
             "gen_ai.transfer.target.name": specialist.name,
-            "gen_ai.transfer.target.type": "agent",
         }
         assert transfer_attributes == {
             "gen_ai.agent.name": "assistant",
             "gen_ai.transfer.mode": "return_to_caller",
             "gen_ai.transfer.target.name": "weather-specialist",
-            "gen_ai.transfer.target.type": "agent",
         }
         tool_span_attributes = {
             "gen_ai.operation.name": "execute_tool",

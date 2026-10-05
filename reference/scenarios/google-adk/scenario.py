@@ -565,13 +565,11 @@ def run_multi_agent_delegation_reference():
                 "gen_ai.agent.name": root_agent.name,
                 "gen_ai.transfer.mode": "return_to_caller",
                 "gen_ai.transfer.target.name": specialist.name,
-                "gen_ai.transfer.target.type": "agent",
             }
             assert transfer_attributes == {
                 "gen_ai.agent.name": "root_agent",
                 "gen_ai.transfer.mode": "return_to_caller",
                 "gen_ai.transfer.target.name": "weather_specialist",
-                "gen_ai.transfer.target.type": "agent",
             }
             tool_span_attributes = {
                 "gen_ai.operation.name": "execute_tool",
