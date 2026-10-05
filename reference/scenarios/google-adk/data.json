@@ -17,6 +17,8 @@
       "gen_ai.agent.description",
       "gen_ai.agent.name",
       "gen_ai.agent.version",
+      "gen_ai.caller.name",
+      "gen_ai.caller.type",
       "gen_ai.input.messages",
       "gen_ai.operation.name",
       "gen_ai.provider.name",
@@ -322,10 +324,6 @@
     "gen_ai.execute_tool.transfer.internal": [
       "gen_ai.transfer.mode",
       "gen_ai.transfer.target.name"
-    ],
-    "gen_ai.invoke_agent.caller.client": [
-      "gen_ai.caller.name",
-      "gen_ai.caller.type"
     ]
   }
 }

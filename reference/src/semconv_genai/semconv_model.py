@@ -169,18 +169,6 @@ def span_specs() -> dict[str, AttributeSpec]:
 @cache
 def span_refinement_specs() -> dict[str, SpanRefinementSpec]:
     return {
-        "invoke_agent_caller_client": SpanRefinementSpec(
-            label="Invoke Agent Caller",
-            required=("gen_ai.caller.type",),
-            conditionally_required=("gen_ai.caller.name",),
-            recommended=(),
-            opt_in=(),
-            registry_id="gen_ai.invoke_agent.caller.client",
-            base_registry_id="gen_ai.invoke_agent.client",
-            operation_name="invoke_agent",
-            span_kind="client",
-            discriminator="gen_ai.caller.type",
-        ),
         "execute_tool_transfer": SpanRefinementSpec(
             label="Execute Tool Transfer",
             required=(),

@@ -43,7 +43,6 @@ Run `uv run update-reports` to regenerate.
 | Span refinement | Libraries |
 | --- | --- |
 | [Execute Tool Transfer](reports/execute-tool-transfer-span-refinement.md) | google-adk, langchain, openai-agents |
-| [Invoke Agent Caller](reports/invoke-agent-caller-client-span-refinement.md) | google-adk |
 
 ### Events
 

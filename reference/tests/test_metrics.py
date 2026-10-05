@@ -115,6 +115,34 @@ def test_execute_tool_transfer_is_a_span_refinement():
         assert "sampling_relevant" not in _attribute_block(transfer, attribute)
 
 
+def test_invoke_agent_client_owns_caller_attributes_without_refinement():
+    repository_root = Path(__file__).parents[2]
+    spans_model = (repository_root / "model" / "gen-ai" / "spans.yaml").read_text(encoding="utf-8")
+    spans, refinements = spans_model.split("span_refinements:", 1)
+    invoke_agent_client = spans.split("- type: gen_ai.invoke_agent.client", 1)[1].split(
+        "- type: gen_ai.invoke_agent.internal", 1
+    )[0]
+    google_adk = (repository_root / "reference" / "scenarios" / "google-adk" / "scenario.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "- ref: gen_ai.caller.type" in invoke_agent_client
+    assert "- ref: gen_ai.caller.name" in invoke_agent_client
+    assert "immediate logical caller" in invoke_agent_client
+    assert "gen_ai.invoke_agent.caller.client" not in refinements
+    caller_type = _attribute_block(invoke_agent_client, "gen_ai.caller.type")
+    caller_name = _attribute_block(invoke_agent_client, "gen_ai.caller.name")
+    assert "explicitly exposed as an agent or workflow" in caller_type
+    assert "including when the invocation fails" in caller_type
+    assert "sampling_relevant: true" in caller_type
+    assert "When `gen_ai.caller.type` is recorded and the caller name is available" in caller_name
+    assert "including when the invocation fails" in caller_name
+    assert "sampling_relevant: true" in caller_name
+    assert "gen_ai.caller." not in invoke_agent_client.split("brief:", 1)[0]
+    assert '"gen_ai.caller.type": call_context["caller_type"]' in google_adk
+    assert '"gen_ai.caller.name": call_context["caller_name"]' in google_adk
+
+
 def test_transfer_examples_use_target_qualified_names_when_available():
     repository_root = Path(__file__).parents[2]
     scenarios_dir = Path(__file__).parents[1] / "scenarios"
@@ -139,38 +167,43 @@ def test_transfer_examples_use_target_qualified_names_when_available():
     assert "[agent-as-a-tool refinement](../gen-ai-agent-spans.md#agent-as-a-tool)" in interaction_examples
 
 
-def test_caller_refinement_is_documented_with_workflow_example():
+def test_caller_attributes_are_documented_with_workflow_example():
     repository_root = Path(__file__).parents[2]
     agent_spans = (repository_root / "docs" / "gen-ai" / "gen-ai-agent-spans.md").read_text(encoding="utf-8")
     interaction_examples = (
         repository_root / "docs" / "gen-ai" / "non-normative" / "examples-agent-interactions.md"
     ).read_text(encoding="utf-8")
 
-    assert 'select(.id == "gen_ai.invoke_agent.caller.client")' in agent_spans
-    assert "## Caller-aware remote invocation" in agent_spans
+    invoke_agent_client = _generated_section(
+        agent_spans,
+        '.registry.spans[] | select(.type == "gen_ai.invoke_agent.client")',
+    )
+    assert "gen_ai.caller.type" in invoke_agent_client
+    assert "gen_ai.caller.name" in invoke_agent_client
+    assert "Caller-aware remote invocation" not in agent_spans
     assert "`gen_ai.caller.type`" in interaction_examples
     assert "`gen_ai.caller.name`" in interaction_examples
     assert "gen_ai.transfer.*` is not recorded because remote invocation" not in interaction_examples
     assert "weather_workflow" in interaction_examples
-    assert "[caller-aware refinement](../gen-ai-agent-spans.md#caller-aware-remote-invocation)" in interaction_examples
+    assert "caller attributes on that span" in interaction_examples
 
 
 def test_agent_interaction_refinements_are_grouped_by_base_span():
     repository_root = Path(__file__).parents[2]
     agent_spans = (repository_root / "docs" / "gen-ai" / "gen-ai-agent-spans.md").read_text(encoding="utf-8")
 
-    caller = agent_spans.index("## Caller-aware remote invocation")
+    invoke_agent = agent_spans.index("## Invoke agent client span")
     execute_tool = agent_spans.index("## Execute tool span")
     transfer = agent_spans.index("### Agent as a tool")
     skills = agent_spans.index("### Agent skills")
 
-    assert caller < execute_tool < transfer < skills
-    assert "  - [Caller-aware remote invocation](#caller-aware-remote-invocation)" in agent_spans
+    assert invoke_agent < execute_tool < transfer < skills
+    assert "Caller-aware remote invocation" not in agent_spans
     assert "    - [Agent as a tool](#agent-as-a-tool)" in agent_spans
     assert "    - [Agent skills](#agent-skills)" in agent_spans
 
 
-def test_generated_base_span_docs_exclude_refinement_only_attributes():
+def test_generated_base_span_docs_include_caller_but_exclude_transfer_attributes():
     repository_root = Path(__file__).parents[2]
     agent_spans = (repository_root / "docs" / "gen-ai" / "gen-ai-agent-spans.md").read_text(encoding="utf-8")
     gen_ai_spans = (repository_root / "docs" / "gen-ai" / "gen-ai-spans.md").read_text(encoding="utf-8")
@@ -178,10 +211,6 @@ def test_generated_base_span_docs_exclude_refinement_only_attributes():
     invoke_agent_base = _generated_section(
         agent_spans,
         '.registry.spans[] | select(.type == "gen_ai.invoke_agent.client")',
-    )
-    caller_refinement = _generated_section(
-        agent_spans,
-        '.refinements.spans[] | select(.id == "gen_ai.invoke_agent.caller.client")',
     )
     execute_tool_base = _generated_section(
         gen_ai_spans,
@@ -192,10 +221,8 @@ def test_generated_base_span_docs_exclude_refinement_only_attributes():
         '.refinements.spans[] | select(.id == "gen_ai.execute_tool.transfer.internal")',
     )
 
-    assert "gen_ai.caller.type" not in invoke_agent_base
-    assert "gen_ai.caller.name" not in invoke_agent_base
-    assert "gen_ai.caller.type" in caller_refinement
-    assert "gen_ai.caller.name" in caller_refinement
+    assert "gen_ai.caller.type" in invoke_agent_base
+    assert "gen_ai.caller.name" in invoke_agent_base
 
     assert "gen_ai.transfer.mode" not in execute_tool_base
     assert "gen_ai.transfer.target.name" not in execute_tool_base
@@ -222,18 +249,18 @@ def test_transfer_refinement_names_agent_target_without_redundant_type():
 
 def test_committed_refinement_reports_preserve_reference_coverage():
     reports = Path(__file__).parents[1] / "reports"
-    caller = (reports / "invoke-agent-caller-client-span-refinement.md").read_text(encoding="utf-8")
+    invoke_agent = (reports / "invoke-agent-client-span.md").read_text(encoding="utf-8")
     transfer = (reports / "execute-tool-transfer-span-refinement.md").read_text(encoding="utf-8")
     readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
 
-    assert "| gen_ai.caller.type | [google-adk] |" in caller
-    assert "| gen_ai.caller.name | [google-adk] |" in caller
+    assert "| gen_ai.caller.type | [google-adk] |" in invoke_agent
+    assert "| gen_ai.caller.name | [google-adk] |" in invoke_agent
     assert "| gen_ai.transfer.mode | [google-adk], [langchain], [openai-agents] |" in transfer
     assert "| gen_ai.transfer.target.name | [google-adk], [langchain], [openai-agents] |" in transfer
     assert "gen_ai.transfer.target.type" not in transfer
-    assert readme.index("[Execute Tool Transfer](reports/execute-tool-transfer-span-refinement.md)") < readme.index(
-        "[Invoke Agent Caller](reports/invoke-agent-caller-client-span-refinement.md)"
-    )
+    assert "[Execute Tool Transfer](reports/execute-tool-transfer-span-refinement.md)" in readme
+    assert "invoke-agent-caller-client-span-refinement.md" not in readme
+    assert not (reports / "invoke-agent-caller-client-span-refinement.md").exists()
 
 
 def test_committed_metrics_do_not_include_transfer_attributes():
@@ -305,56 +332,56 @@ def test_span_types_absent_from_a_data_file_are_not_reported():
     assert entry.spans == {}
 
 
-def test_refinement_data_normalizes_against_refinement_specs():
+def test_refinement_data_normalizes_against_transfer_refinement_spec():
     entry = _normalize_scenario_data_entry(
         {
             "span_refinements": {
-                "gen_ai.invoke_agent.caller.client": [
-                    "gen_ai.caller.name",
-                    "gen_ai.caller.type",
+                "gen_ai.execute_tool.transfer.internal": [
+                    "gen_ai.transfer.mode",
+                    "gen_ai.transfer.target.name",
                 ]
             }
         },
-        "google-adk",
+        "openai-agents",
     )
 
-    assert entry.span_refinements["invoke_agent_caller_client"] == {
-        "gen_ai.caller.name": "present",
-        "gen_ai.caller.type": "present",
+    assert entry.span_refinements["execute_tool_transfer"] == {
+        "gen_ai.transfer.mode": "present",
+        "gen_ai.transfer.target.name": "present",
     }
 
 
-def test_generated_refinement_reports_keep_base_and_refinement_coverage_separate(tmp_path):
+def test_generated_transfer_refinement_report_keeps_base_coverage_separate(tmp_path):
     entry = _normalize_scenario_data_entry(
         {
             "spans": {
-                "gen_ai.invoke_agent.client": [
+                "gen_ai.execute_tool.internal": [
                     "gen_ai.operation.name",
-                    "gen_ai.provider.name",
+                    "gen_ai.tool.name",
                 ]
             },
             "span_refinements": {
-                "gen_ai.invoke_agent.caller.client": [
-                    "gen_ai.caller.name",
-                    "gen_ai.caller.type",
+                "gen_ai.execute_tool.transfer.internal": [
+                    "gen_ai.transfer.mode",
+                    "gen_ai.transfer.target.name",
                 ]
             },
         },
-        "google-adk",
+        "openai-agents",
     )
 
     page = _render_signal_section(
         [entry],
-        "invoke_agent_caller_client",
-        span_refinement_specs()["invoke_agent_caller_client"],
+        "execute_tool_transfer",
+        span_refinement_specs()["execute_tool_transfer"],
         tmp_path,
         "Span Refinement",
         lambda item: item.span_refinements,
     )
 
     rendered = "\n".join(page)
-    assert "# Invoke Agent Caller Span Refinement" in rendered
-    assert "| gen_ai.caller.type | [google-adk] |" in rendered
+    assert "# Execute Tool Transfer Span Refinement" in rendered
+    assert "| gen_ai.transfer.mode | [openai-agents] |" in rendered
     assert "gen_ai.operation.name" not in rendered
 
 
@@ -364,15 +391,9 @@ def test_span_specs_are_named_as_the_registry_names_them():
 
 
 def test_span_refinement_specs_describe_the_same_physical_base_spans():
-    caller = span_refinement_specs()["invoke_agent_caller_client"]
     transfer = span_refinement_specs()["execute_tool_transfer"]
 
-    assert caller.registry_id == "gen_ai.invoke_agent.caller.client"
-    assert caller.base_registry_id == "gen_ai.invoke_agent.client"
-    assert caller.operation_name == "invoke_agent"
-    assert caller.span_kind == "client"
-    assert caller.discriminator == "gen_ai.caller.type"
-
+    assert set(span_refinement_specs()) == {"execute_tool_transfer"}
     assert transfer.registry_id == "gen_ai.execute_tool.transfer.internal"
     assert transfer.base_registry_id == "gen_ai.execute_tool.internal"
     assert transfer.operation_name == "execute_tool"
@@ -417,10 +438,6 @@ def test_collect_span_refinement_coverage_uses_discriminators(tmp_path):
             "gen_ai.transfer.mode",
             "gen_ai.transfer.target.name",
         ],
-        "gen_ai.invoke_agent.caller.client": [
-            "gen_ai.caller.name",
-            "gen_ai.caller.type",
-        ],
     }
 
 
@@ -428,23 +445,25 @@ def test_collect_span_refinement_coverage_excludes_type_mismatches(tmp_path):
     report_dir = tmp_path / "weaver-reports-mismatch"
     report_dir.mkdir()
     sample = _raw_span(
-        "client",
+        "internal",
         {
-            "gen_ai.operation.name": "invoke_agent",
-            "gen_ai.caller.type": "workflow",
-            "gen_ai.caller.name": "weather_workflow",
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.transfer.mode": "return_to_caller",
+            "gen_ai.transfer.target.name": "weather_agent",
         },
     )
-    caller_name = next(
-        attribute for attribute in sample["span"]["attributes"] if attribute["name"] == "gen_ai.caller.name"
+    target_name = next(
+        attribute for attribute in sample["span"]["attributes"] if attribute["name"] == "gen_ai.transfer.target.name"
     )
-    caller_name["live_check_result"] = {"all_advice": [{"id": "type_mismatch"}]}
+    target_name["live_check_result"] = {"all_advice": [{"id": "type_mismatch"}]}
     (report_dir / "reference.json").write_text(
         json.dumps({"samples": [sample]}),
         encoding="utf-8",
     )
 
-    assert collect_span_refinement_coverage(report_dir) == {"gen_ai.invoke_agent.caller.client": ["gen_ai.caller.type"]}
+    assert collect_span_refinement_coverage(report_dir) == {
+        "gen_ai.execute_tool.transfer.internal": ["gen_ai.transfer.mode"]
+    }
 
 
 def test_update_span_refinement_coverage_preserves_runner_data(tmp_path):
@@ -480,12 +499,7 @@ def test_update_span_refinement_coverage_preserves_runner_data(tmp_path):
 
     updated = json.loads((scenario_dir / "data.json").read_text(encoding="utf-8"))
     assert updated["spans"] == original["spans"]
-    assert updated["span_refinements"] == {
-        "gen_ai.invoke_agent.caller.client": [
-            "gen_ai.caller.name",
-            "gen_ai.caller.type",
-        ]
-    }
+    assert updated["span_refinements"] == {}
 
 
 def test_runner_output_paths_follow_conformance_flags(tmp_path):
@@ -570,12 +584,7 @@ def test_complete_runner_output_updates_selected_paths(tmp_path):
         before,
     )
     updated = json.loads(data_file.read_text(encoding="utf-8"))
-    assert updated["span_refinements"] == {
-        "gen_ai.invoke_agent.caller.client": [
-            "gen_ai.caller.name",
-            "gen_ai.caller.type",
-        ]
-    }
+    assert updated["span_refinements"] == {}
 
 
 def test_invoke_agent_client_does_not_duplicate_transfer_target():
@@ -584,46 +593,17 @@ def test_invoke_agent_client_does_not_duplicate_transfer_target():
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in attributes)
 
 
-def test_invoke_agent_caller_is_a_span_refinement():
-    repository_root = Path(__file__).parents[2]
-    registry_model = (repository_root / "model" / "gen-ai" / "registry.yaml").read_text(encoding="utf-8")
-    spans_model = (repository_root / "model" / "gen-ai" / "spans.yaml").read_text(encoding="utf-8")
-    spans, refinements = spans_model.split("span_refinements:", 1)
-    invoke_agent_client = spans.split("- type: gen_ai.invoke_agent.client", 1)[1].split(
-        "- type: gen_ai.invoke_agent.internal", 1
-    )[0]
-    caller = refinements.split("- id: gen_ai.invoke_agent.caller.client", 1)[1].split("\n  - id:", 1)[0]
-
-    assert "- key: gen_ai.caller.type" in registry_model
-    assert 'value: "agent"' in registry_model
-    assert 'value: "workflow"' in registry_model
-    assert "- key: gen_ai.caller.name" in registry_model
-
-    assert "ref: gen_ai.invoke_agent.client" in caller
-    assert "does not produce an additional span" in caller
-    assert "even when the invocation fails" in caller
-    assert "readily available from the instrumented" in caller
-    assert "MUST NOT infer" not in caller
-    assert "- ref: gen_ai.transfer." not in caller
-
-    for attribute in _CALLER_ATTRIBUTES:
-        assert f"- ref: {attribute}" not in invoke_agent_client
-        assert f"- ref: {attribute}" in caller
-        assert "sampling_relevant: true" in _attribute_block(caller, attribute)
-
-
 def test_committed_google_adk_remote_agent_covers_internal_and_client_spans():
     path = Path(__file__).parents[1] / "scenarios" / "google-adk" / "data.json"
     data = json.loads(path.read_text(encoding="utf-8"))
 
     invoke_agent_internal = data["spans"]["gen_ai.invoke_agent.internal"]
     invoke_agent_client = data["spans"]["gen_ai.invoke_agent.client"]
-    caller_refinement = data["span_refinements"]["gen_ai.invoke_agent.caller.client"]
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in invoke_agent_internal)
     assert "gen_ai.agent.name" in invoke_agent_client
     assert "gen_ai.provider.name" in invoke_agent_client
-    assert not any(attribute.startswith("gen_ai.caller.") for attribute in invoke_agent_client)
-    assert set(caller_refinement) >= _CALLER_ATTRIBUTES
+    assert set(invoke_agent_client) >= _CALLER_ATTRIBUTES
+    assert "gen_ai.invoke_agent.caller.client" not in data["span_refinements"]
     assert not any(attribute.startswith("gen_ai.transfer.") for attribute in invoke_agent_client)
 
 
@@ -763,10 +743,11 @@ if __name__ == "__main__":
     test_metric_specs_are_named_as_the_registry_names_them()
     test_execute_tool_duration_does_not_include_transfer_attributes()
     test_execute_tool_transfer_is_a_span_refinement()
+    test_invoke_agent_client_owns_caller_attributes_without_refinement()
     test_transfer_examples_use_target_qualified_names_when_available()
-    test_caller_refinement_is_documented_with_workflow_example()
+    test_caller_attributes_are_documented_with_workflow_example()
     test_agent_interaction_refinements_are_grouped_by_base_span()
-    test_generated_base_span_docs_exclude_refinement_only_attributes()
+    test_generated_base_span_docs_include_caller_but_exclude_transfer_attributes()
     test_committed_refinement_reports_preserve_reference_coverage()
     test_committed_metrics_do_not_include_transfer_attributes()
     test_committed_google_adk_metrics_round_trip()
@@ -775,9 +756,9 @@ if __name__ == "__main__":
     test_registry_span_names_map_onto_report_keys()
     test_events_keep_their_registry_names()
     test_span_types_absent_from_a_data_file_are_not_reported()
-    test_refinement_data_normalizes_against_refinement_specs()
+    test_refinement_data_normalizes_against_transfer_refinement_spec()
     with TemporaryDirectory() as tmpdir:
-        test_generated_refinement_reports_keep_base_and_refinement_coverage_separate(Path(tmpdir))
+        test_generated_transfer_refinement_report_keeps_base_coverage_separate(Path(tmpdir))
     test_span_specs_are_named_as_the_registry_names_them()
     test_span_refinement_specs_describe_the_same_physical_base_spans()
     with TemporaryDirectory() as tmpdir:
@@ -789,7 +770,6 @@ if __name__ == "__main__":
         test_partial_runner_output_does_not_update_refinement_coverage(tmp_path)
         test_complete_runner_output_updates_selected_paths(tmp_path)
     test_invoke_agent_client_does_not_duplicate_transfer_target()
-    test_invoke_agent_caller_is_a_span_refinement()
     test_committed_google_adk_remote_agent_covers_internal_and_client_spans()
     test_google_adk_remote_agent_uses_public_per_invocation_caller_state()
     test_google_adk_remote_client_records_available_version_and_errors()
