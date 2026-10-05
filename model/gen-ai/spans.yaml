@@ -519,8 +519,7 @@ spans:
 
       Record `gen_ai.caller.*` when the instrumented library or protocol
       exposes the immediate logical caller as an agent or workflow. These
-      attributes provide logical caller attribution. Transfer semantics are
-      recorded with `gen_ai.transfer.*` on applicable transfer refinements.
+      attributes provide logical caller attribution.
     stability: development
     attributes:
       - ref_group: attributes.gen_ai.invoke_agent.common

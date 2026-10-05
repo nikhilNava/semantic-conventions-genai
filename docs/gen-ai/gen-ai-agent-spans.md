@@ -204,8 +204,7 @@ Examples: OpenAI Assistants API, AWS Bedrock Agents.
 
 Record `gen_ai.caller.*` when the instrumented library or protocol
 exposes the immediate logical caller as an agent or workflow. These
-attributes provide logical caller attribution. Transfer semantics are
-recorded with `gen_ai.transfer.*` on applicable transfer refinements.
+attributes provide logical caller attribution.
 
 **Span name** SHOULD be `invoke_agent {gen_ai.agent.name}` if `gen_ai.agent.name` is readily available.
 When `gen_ai.agent.name` is not available, it SHOULD be `invoke_agent`.
