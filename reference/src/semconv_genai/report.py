@@ -25,7 +25,6 @@ from semconv_genai.attribute_spec import AttributeSpec, RequirementLevel
 from semconv_genai.data_files import (
     ENTITY_TYPE_ORDER,
     EVENT_TYPE_ORDER,
-    SPAN_REFINEMENT_ORDER,
     SPAN_TYPE_ORDER,
     ScenarioDataEntry,
     load_scenario_data_files,
@@ -35,7 +34,6 @@ from semconv_genai.semconv_model import (
     entity_specs,
     event_specs,
     metric_specs,
-    span_refinement_specs,
     span_specs,
 )
 
@@ -78,10 +76,6 @@ def _metrics_of(entry: ScenarioDataEntry) -> dict[str, dict[str, str]]:
     return entry.metrics
 
 
-def _span_refinements_of(entry: ScenarioDataEntry) -> dict[str, dict[str, str]]:
-    return entry.span_refinements
-
-
 # Relative paths from reports/ to the semantic convention doc page + anchor.
 SEMCONV_DOC_LINKS: dict[str, str] = {
     "create_agent": "../../docs/gen-ai/gen-ai-agent-spans.md#create-agent-span",
@@ -95,7 +89,6 @@ SEMCONV_DOC_LINKS: dict[str, str] = {
     "fetch_response": "../../docs/gen-ai/gen-ai-spans.md#fetch-response",
     "memory": "../../docs/gen-ai/gen-ai-spans.md#memory",
     "execute_tool": "../../docs/gen-ai/gen-ai-spans.md#execute-tool-span",
-    "execute_tool_transfer": "../../docs/gen-ai/gen-ai-agent-spans.md#agent-as-a-tool",
     "gen_ai.client.inference.operation.details": "../../docs/gen-ai/gen-ai-events.md#event-gen_aiclientinferenceoperationdetails",
     "gen_ai.evaluation.result": "../../docs/gen-ai/gen-ai-events.md#event-gen_aievaluationresult",
     "gen_ai.main_agent": "../../docs/registry/entities/gen-ai.md#gen-ai-main-agent",
@@ -252,27 +245,6 @@ def generate_index_markdown(
     lines.extend(
         [
             "",
-            "### Span refinements",
-            "",
-            "| Span refinement | Libraries |",
-            "| --- | --- |",
-        ]
-    )
-
-    for refinement_type in SPAN_REFINEMENT_ORDER:
-        spec = span_refinement_specs()[refinement_type]
-        filename = _report_filename(refinement_type, "span-refinement")
-        supporting = _get_supporting_entries(
-            entries,
-            refinement_type,
-            spec,
-            _span_refinements_of,
-        )
-        lines.append(f"| [{spec.label}](reports/{filename}) | {_library_dir_links(supporting)} |")
-
-    lines.extend(
-        [
-            "",
             "### Events",
             "",
             "| Event | Libraries |",
@@ -335,25 +307,6 @@ def write_report_pages(output_dir: Path) -> None:
         page_path = reports_dir / _report_filename(span_type, "span")
         page_lines = _render_signal_section(entries, span_type, spec, reports_dir, "Span", _spans_of)
         page_path.write_text(_generate_detail_page(page_lines), encoding="utf-8")
-
-    for refinement_type in SPAN_REFINEMENT_ORDER:
-        spec = span_refinement_specs()[refinement_type]
-        page_path = reports_dir / _report_filename(
-            refinement_type,
-            "span-refinement",
-        )
-        page_lines = _render_signal_section(
-            entries,
-            refinement_type,
-            spec,
-            reports_dir,
-            "Span Refinement",
-            _span_refinements_of,
-        )
-        page_path.write_text(
-            _generate_detail_page(page_lines),
-            encoding="utf-8",
-        )
 
     for event_type in EVENT_TYPE_ORDER:
         spec = event_specs()[event_type]

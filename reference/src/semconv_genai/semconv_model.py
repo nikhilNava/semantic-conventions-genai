@@ -24,7 +24,7 @@ import json
 from functools import cache
 
 from semconv_genai import MODEL_ROOT
-from semconv_genai.attribute_spec import AttributeSpec, SpanRefinementSpec
+from semconv_genai.attribute_spec import AttributeSpec
 from semconv_genai.conformance import coverage_model
 
 # The signals the reports cover, as {report key: (registry name, label)}. A
@@ -164,27 +164,6 @@ def _model() -> dict[str, dict]:
 def span_specs() -> dict[str, AttributeSpec]:
     model = _model()
     return {key: _spec(model, "spans", registry_id, label) for key, (registry_id, label) in _SPANS.items()}
-
-
-@cache
-def span_refinement_specs() -> dict[str, SpanRefinementSpec]:
-    return {
-        "execute_tool_transfer": SpanRefinementSpec(
-            label="Execute Tool Transfer",
-            required=(),
-            conditionally_required=(
-                "gen_ai.transfer.mode",
-                "gen_ai.transfer.target.name",
-            ),
-            recommended=(),
-            opt_in=(),
-            registry_id="gen_ai.execute_tool.transfer.internal",
-            base_registry_id="gen_ai.execute_tool.internal",
-            operation_name="execute_tool",
-            span_kind="internal",
-            discriminator="gen_ai.transfer.mode",
-        ),
-    }
 
 
 @cache

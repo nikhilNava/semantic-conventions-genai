@@ -38,12 +38,6 @@ Run `uv run update-reports` to regenerate.
 | [Memory](reports/memory-span.md) | aws-bedrock-agentcore, google-adk |
 | [Execute Tool](reports/execute-tool-span.md) | agent-framework, autogen, crewai, google-adk, google-genai, langchain, llamaindex, openai-agents, openai-assistants, pydantic-ai, vertexai |
 
-### Span refinements
-
-| Span refinement | Libraries |
-| --- | --- |
-| [Execute Tool Transfer](reports/execute-tool-transfer-span-refinement.md) | google-adk, langchain, openai-agents |
-
 ### Events
 
 | Event | Libraries |

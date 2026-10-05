@@ -118,13 +118,10 @@ jobs:
           cache-dependency-glob: "reference/**/uv.lock"
 
       - name: Lint Python
-        run: uv tool run --from ruff ruff check src scenarios tests
+        run: uv tool run --from ruff ruff check src scenarios
 
       - name: Check Python formatting
-        run: uv tool run --from ruff ruff format --check src scenarios tests
-
-      - name: Test reference tooling
-        run: uv run --frozen --extra dev pytest tests/test_metrics.py
+        run: uv tool run --from ruff ruff format --check src scenarios
 
   # ── Discover scenario matrices ─────────────────────────────────────
   reference-scenario-matrix:

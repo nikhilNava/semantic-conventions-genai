@@ -128,11 +128,5 @@
       }
     }
   ],
-  "entities": {},
-  "span_refinements": {
-    "gen_ai.execute_tool.transfer.internal": [
-      "gen_ai.transfer.mode",
-      "gen_ai.transfer.target.name"
-    ]
-  }
+  "entities": {}
 }
