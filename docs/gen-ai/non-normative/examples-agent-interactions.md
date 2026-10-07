@@ -1,9 +1,13 @@
 # Tracking agent-to-agent interactions
 
-Agent-to-agent interactions appear at different runtime boundaries. Use the
-`gen_ai.execute_tool.transfer.internal` refinement when a framework exposes the
-target agent through a tool or handoff. Use a `gen_ai.invoke_agent.client` span
-when instrumentation observes a remote agent API or protocol call.
+Use one of the following approaches to trace an agent invoking another agent:
+
+- When an agent invokes another agent through a tool, apply the
+  `gen_ai.execute_tool.transfer.internal` refinement to the execute-tool span.
+- When an agent invokes another agent through an API, protocol, or other remote
+  client mechanism, use a `gen_ai.invoke_agent.client` span. Record
+  `gen_ai.caller.*` on that span when the library exposes the immediate
+  logical caller as an agent or workflow.
 
 These spans are not competing representations of the same operation. Record
 both only when they describe distinct boundaries, such as an agent tool that
@@ -58,12 +62,13 @@ For a transfer that does not return control to the source agent, the
 | `gen_ai.transfer.mode` | `"pass_control"` |
 | `gen_ai.transfer.target.name` | `"weather_agent"` |
 
-## Agent invocation through an API or protocol
+## Agent invocation through a remote client
 
-When an agent invokes another agent through an API or protocol, use the existing
-`invoke_agent` CLIENT span. `gen_ai.agent.*` identifies the invoked agent.
-When the library explicitly exposes the immediate logical caller, record the
-caller attributes on that span:
+When an agent invokes another agent through an API, protocol, or other remote
+client mechanism, use the existing `invoke_agent` CLIENT span.
+`gen_ai.agent.*` identifies the invoked agent. When the library explicitly
+exposes the immediate logical caller, record the caller attributes on that
+span:
 
 - `gen_ai.caller.type` identifies whether that caller is an agent or workflow.
 - `gen_ai.caller.name` identifies the immediate logical caller.

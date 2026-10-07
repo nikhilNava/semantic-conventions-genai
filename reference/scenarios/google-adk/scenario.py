@@ -88,6 +88,8 @@ class A2ATopologyRecorder(SpanProcessor):
     def __init__(self):
         self.workflow_span_id = None
         self.routing_agent_span_id = None
+        self.agent_tool_span_id = None
+        self.agent_tool_parent_span_id = None
         self.internal_spans = {}
         self.client_calls = {}
 
@@ -105,6 +107,9 @@ class A2ATopologyRecorder(SpanProcessor):
             and attributes.get("gen_ai.agent.name") == "routing_agent"
         ):
             self.routing_agent_span_id = span.context.span_id
+        elif operation_name == "execute_tool" and attributes.get("gen_ai.transfer.target.name") == "agent_remote_agent":
+            self.agent_tool_span_id = span.context.span_id
+            self.agent_tool_parent_span_id = span.parent.span_id if span.parent else None
         elif operation_name == "invoke_agent" and span.kind == SpanKind.INTERNAL:
             agent_name = attributes.get("gen_ai.agent.name")
             if agent_name in {"workflow_remote_agent", "agent_remote_agent"}:
@@ -128,6 +133,10 @@ class A2ATopologyRecorder(SpanProcessor):
             raise AssertionError("Workflow span was not recorded")
         if self.routing_agent_span_id is None:
             raise AssertionError("Routing agent span was not recorded")
+        if self.agent_tool_span_id is None:
+            raise AssertionError("AgentTool transfer span was not recorded")
+        if self.agent_tool_parent_span_id != self.routing_agent_span_id:
+            raise AssertionError("AgentTool transfer span has the wrong routing-agent parent")
         expected_callers = {
             ("workflow", "invoke_remote_weather_agent"),
             ("workflow", "invoke_remote_forecast_agent"),
@@ -145,7 +154,7 @@ class A2ATopologyRecorder(SpanProcessor):
             if caller[0] == "workflow":
                 if agent_name != "workflow_remote_agent" or parent_span_id != self.workflow_span_id:
                     raise AssertionError(f"Workflow A2A call {caller} has the wrong span topology")
-            elif agent_name != "agent_remote_agent" or parent_span_id != self.routing_agent_span_id:
+            elif agent_name != "agent_remote_agent" or parent_span_id != self.agent_tool_span_id:
                 raise AssertionError(f"AgentTool A2A call {caller} has the wrong span topology")
 
     def shutdown(self):
@@ -757,6 +766,10 @@ def run_remote_a2a_agent_reference(topology_recorder):
                 node_input=node_input,
             )
 
+        async def collect_remote_results(ctx, node_input):
+            del ctx
+            return node_input
+
         weather_workflow_step = FunctionNode(
             name="invoke_remote_weather_agent",
             func=invoke_remote_weather_agent,
@@ -767,12 +780,19 @@ def run_remote_a2a_agent_reference(topology_recorder):
             func=invoke_remote_forecast_agent,
             rerun_on_resume=True,
         )
+        collect_workflow_step = FunctionNode(
+            name="collect_remote_results",
+            func=collect_remote_results,
+            rerun_on_resume=True,
+        )
         workflow = Workflow(
             name="weather_workflow",
             description="Invokes the remote weather agent.",
             edges=[
                 (START, weather_workflow_step),
                 (START, forecast_workflow_step),
+                (weather_workflow_step, collect_workflow_step),
+                (forecast_workflow_step, collect_workflow_step),
             ],
         )
         agent_tool = AgentTool(agent=agent_remote_agent)
@@ -892,15 +912,33 @@ def run_remote_a2a_agent_reference(topology_recorder):
                 "caller_name": tool_context.agent_name,
                 "remote_agent": self.agent,
             }
-            token = _otel_context.attach(_otel_context.set_value(_A2A_CALL_CONTEXT_KEY, call_context))
-            try:
-                return await original_agent_tool_run(
-                    self,
-                    args=args,
-                    tool_context=tool_context,
-                )
-            finally:
-                _otel_context.detach(token)
+            tool_attributes = {
+                "gen_ai.operation.name": "execute_tool",
+                "gen_ai.tool.name": self.name,
+                "gen_ai.tool.type": "function",
+                "gen_ai.agent.name": tool_context.agent_name,
+                "gen_ai.transfer.mode": "return_to_caller",
+                "gen_ai.transfer.target.name": self.agent.name,
+            }
+            with _reference_tracer.start_as_current_span(
+                f"execute_tool {self.name} {self.agent.name}",
+                kind=SpanKind.INTERNAL,
+                attributes=tool_attributes,
+            ) as tool_span:
+                if tool_context.function_call_id:
+                    tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
+                tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps(args))
+                token = _otel_context.attach(_otel_context.set_value(_A2A_CALL_CONTEXT_KEY, call_context))
+                try:
+                    result = await original_agent_tool_run(
+                        self,
+                        args=args,
+                        tool_context=tool_context,
+                    )
+                finally:
+                    _otel_context.detach(token)
+                tool_span.set_attribute("gen_ai.tool.call.result", str(result))
+                return result
 
         async def _invoke_workflow():
             session = await workflow_sessions.create_session(

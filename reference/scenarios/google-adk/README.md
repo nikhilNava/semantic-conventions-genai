@@ -12,7 +12,8 @@ The `RemoteA2aAgent` scenario exercises two library-owned caller paths:
   `run_node` argument identifies the target;
 - a `routing_agent` invokes a `RemoteA2aAgent` through `AgentTool`;
   `ToolContext.agent_name` identifies the caller and public `AgentTool.agent`
-  identifies the target.
+  identifies the target. The AgentTool invocation records an execute-tool
+  transfer span, and the remote request records its invoke-agent CLIENT child.
 
 Instrumentation carries the workflow call through a task-local context because
 ADK schedules the target node in another task. It propagates the AgentTool call
