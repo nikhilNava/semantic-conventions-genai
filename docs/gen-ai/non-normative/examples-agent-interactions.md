@@ -73,15 +73,18 @@ span:
 - `gen_ai.caller.type` identifies whether that caller is an agent or workflow.
 - `gen_ai.caller.name` identifies the immediate logical caller.
 
-Google ADK exposes the immediate caller before a `RemoteA2aAgent` sends its A2A
-request. `Context.node` identifies a workflow step, while
-`ToolContext.agent_name` identifies an agent using `AgentTool`. Framework
-instrumentation can carry that caller to the A2A CLIENT span.
+In this Google ADK example, the `weather_planning_workflow` runs a
+`fetch_remote_weather` step. That step invokes a local `RemoteA2aAgent` adapter,
+which sends an A2A request to the `weather_agent` running in another process.
+The workflow step is the logical caller, and `weather_agent` is the target.
 
-The local `RemoteA2aAgent` execution is an `invoke_agent` INTERNAL span, and the
-protocol request is its `invoke_agent` CLIENT child. The caller attributes
-preserve the logical workflow caller on the client request, while the parent
-span represents the local `RemoteA2aAgent` execution.
+Google ADK exposes the workflow step through `Context.node`. Instrumentation
+carries that value to the A2A CLIENT span as `gen_ai.caller.name`. The local
+adapter execution is an `invoke_agent` INTERNAL span, while the protocol
+request is its `invoke_agent` CLIENT child.
+
+When an agent uses `AgentTool` instead of a workflow step,
+`ToolContext.agent_name` identifies the logical caller.
 
 The target process can record the agent's execution as an `invoke_agent`
 INTERNAL span. Propagated trace context links that execution as a descendant of
@@ -90,14 +93,14 @@ the CLIENT span.
 ```mermaid
 flowchart LR
   subgraph C["CALLER PROCESS"]
-    C1["invoke_workflow weather_workflow [INTERNAL]<br/>workflow.name = weather_workflow"]
-    C2["invoke_agent remote_weather_agent [INTERNAL]<br/>agent.name = remote_weather_agent"]
-    C3["invoke_agent weather-agent [CLIENT]<br/>agent.name = weather-agent<br/>caller.type = workflow<br/>caller.name = invoke_remote_weather_agent"]
+    C1["invoke_workflow weather_planning_workflow [INTERNAL]<br/>workflow.name = weather_planning_workflow"]
+    C2["invoke_agent remote_weather_client [INTERNAL]<br/>local RemoteA2aAgent adapter"]
+    C3["invoke_agent weather_agent [CLIENT]<br/>agent.name = weather_agent<br/>caller.type = workflow<br/>caller.name = fetch_remote_weather"]
     C1 --> C2
     C2 --> C3
   end
   subgraph T["TARGET PROCESS"]
-    T1["invoke_agent weather-agent [INTERNAL]"]
+    T1["invoke_agent weather_agent [INTERNAL]"]
   end
   C3 --> T1
 ```
