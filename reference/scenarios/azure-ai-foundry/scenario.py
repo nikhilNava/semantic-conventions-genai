@@ -15,6 +15,11 @@ from reference_shared import flush_and_shutdown, setup_otel
 
 MOCK_BASE_URL = os.environ["MOCK_LLM_URL"]
 FOUNDRY_PROJECT_ENDPOINT = "https://foundry-resource.services.ai.azure.com/api/projects/reference-project"
+FOUNDRY_PROJECT_ID = (
+    "/subscriptions/b17253fa-f327-42d6-9686-f3e553e24763/resourceGroups/hanchi-test/"
+    "providers/Microsoft.CognitiveServices/accounts/hancwang-swectr/projects/hancwang-swectr-proj"
+)
+FOUNDRY_CONNECTION_ID = f"{FOUNDRY_PROJECT_ID}/connections/reference-connection"
 _project_endpoint = urlparse(FOUNDRY_PROJECT_ENDPOINT)
 _SERVER_ADDRESS = _project_endpoint.hostname
 _SERVER_PORT = _project_endpoint.port
@@ -65,8 +70,12 @@ class MockTransportPolicy(SansIOHTTPPolicy):
         if request_url.netloc != _project_endpoint.netloc or not request_url.path.startswith(logical_path):
             raise ValueError(f"unexpected Foundry project request URL: {request.http_request.url}")
 
+        project_path = request_url.path.removeprefix(logical_path)
+        if request.http_request.method == "GET" and project_path == "/connections":
+            request.context["mock_foundry_connections"] = True
+
         mock_url = urlparse(MOCK_BASE_URL)
-        mock_path = f"{mock_url.path.rstrip('/')}{request_url.path.removeprefix(logical_path)}"
+        mock_path = f"{mock_url.path.rstrip('/')}{project_path}"
         request.http_request.url = urlunparse(
             request_url._replace(
                 scheme=mock_url.scheme,
@@ -76,6 +85,37 @@ class MockTransportPolicy(SansIOHTTPPolicy):
         )
         request.http_request.headers["Host"] = mock_url.netloc
 
+    def on_response(self, request, response):
+        if not request.context.get("mock_foundry_connections"):
+            return
+
+        response_body = json.dumps(
+            {
+                "value": [
+                    {
+                        "name": "reference-connection",
+                        "id": FOUNDRY_CONNECTION_ID,
+                        "type": "CognitiveSearch",
+                        "target": "https://reference.search.windows.net",
+                        "isDefault": True,
+                        "credentials": {"type": "ApiKey"},
+                        "metadata": {},
+                    }
+                ]
+            }
+        ).encode()
+        response.http_response._status_code = 200
+        response.http_response._reason = "OK"
+        response.http_response._content_type = "application/json"
+        response.http_response._content = response_body
+        response.http_response._text = None
+        response.http_response._json = None
+        response.http_response.headers["content-type"] = "application/json"
+        response.http_response.internal_response.status_code = 200
+        response.http_response.internal_response.reason = "OK"
+        response.http_response.internal_response.headers["content-type"] = "application/json"
+        response.http_response.internal_response._content = response_body
+
 
 class MockCredential:
     """Dummy TokenCredential for testing against the mock server."""
@@ -84,7 +124,7 @@ class MockCredential:
         return AccessToken("mock-token", 9999999999)
 
 
-def run_invoke_agent(client):
+def run_invoke_agent(client, connection):
     """Exercise Azure AI Foundry Agents API with manual OTel spans.
 
     Creates a CLIENT span with gen_ai invoke_agent attributes to demonstrate
@@ -93,6 +133,10 @@ def run_invoke_agent(client):
     result).
     """
     print("  [invoke_agent] Azure AI Foundry Agents: create + run")
+
+    if "/connections/" not in connection.id:
+        raise ValueError(f"unexpected Foundry connection resource ID: {connection.id}")
+    project_id = connection.id.rsplit("/connections/", 1)[0]
 
     tool_defs = [
         {
@@ -110,11 +154,26 @@ def run_invoke_agent(client):
             },
         }
     ]
+    agent_tools = [
+        *tool_defs,
+        {
+            "type": "azure_ai_search",
+            "azure_ai_search": {
+                "indexes": [
+                    {
+                        "project_connection_id": connection.id,
+                        "index_name": "reference-index",
+                        "query_type": "simple",
+                    }
+                ]
+            },
+        },
+    ]
 
     # Create agent version using the v2 AIProjectClient surface.
     span_attributes = {
         "gen_ai.operation.name": "create_agent",
-        "gen_ai.provider.name": "azure.ai.foundry",
+        "gen_ai.provider.name": "microsoft.foundry",
         "gen_ai.request.model": AGENT_MODEL,
         "gen_ai.agent.name": AGENT_NAME,
         "server.address": _SERVER_ADDRESS,
@@ -149,7 +208,7 @@ def run_invoke_agent(client):
                 definition=PromptAgentDefinition(
                     model=AGENT_MODEL,
                     instructions=AGENT_INSTRUCTIONS,
-                    tools=tool_defs,
+                    tools=agent_tools,
                 ),
                 description=AGENT_DESCRIPTION,
             )
@@ -174,9 +233,10 @@ def run_invoke_agent(client):
         conversation = openai_client.conversations.create()
         span_attributes_2 = {
             "gen_ai.operation.name": "invoke_agent",
-            "gen_ai.provider.name": "azure.ai.foundry",
+            "gen_ai.provider.name": "microsoft.foundry",
             "gen_ai.agent.name": agent.name,
             "gen_ai.conversation.id": conversation.id,
+            "microsoft.foundry.project.id": project_id,
             "server.address": _SERVER_ADDRESS,
         }
         if _SERVER_PORT is not None and _SERVER_PORT != 443:
@@ -267,7 +327,10 @@ if __name__ == "__main__":
             authentication_policy=SansIOHTTPPolicy(),
             per_call_policies=[MockTransportPolicy()],
         )
-        run_invoke_agent(client)
+        connection = next(iter(client.connections.list()), None)
+        if connection is None:
+            raise RuntimeError("Foundry project has no connection resource from which to derive the project ID")
+        run_invoke_agent(client, connection)
     except BaseException as error:  # noqa: BLE001
         primary_error = error
 

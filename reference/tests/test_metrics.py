@@ -24,6 +24,11 @@ from semconv_genai.semconv_model import entity_specs, metric_specs, span_specs
 _TOOL_CALLS = "gen_ai.invoke_agent.tool_calls"
 _INFERENCE_CALLS = "gen_ai.invoke_agent.inference_calls"
 _SEMCONV_ROOT = Path(__file__).resolve().parents[2]
+_FOUNDRY_PROJECT_ID = (
+    "/subscriptions/b17253fa-f327-42d6-9686-f3e553e24763/resourceGroups/hanchi-test/"
+    "providers/Microsoft.CognitiveServices/accounts/hancwang-swectr/projects/hancwang-swectr-proj"
+)
+_FOUNDRY_CONNECTION_ID = f"{_FOUNDRY_PROJECT_ID}/connections/reference-connection"
 
 
 def _load_semconv_yaml(relative_path: str) -> dict:
@@ -57,9 +62,9 @@ def _load_foundry_run_invoke_agent(*, default_http_client_factory=SimpleNamespac
     spans = {}
 
     class FakeSpan:
-        def __init__(self, name):
+        def __init__(self, name, attributes=None):
             self.name = name
-            self.attributes = {}
+            self.attributes = dict(attributes or {})
             self.exception = None
             self.status = None
 
@@ -81,7 +86,7 @@ def _load_foundry_run_invoke_agent(*, default_http_client_factory=SimpleNamespac
 
     class FakeTracer:
         def start_as_current_span(self, name, **kwargs):
-            span = FakeSpan(name)
+            span = FakeSpan(name, kwargs.get("attributes"))
             spans[name] = span
             return span
 
@@ -103,7 +108,14 @@ def _load_foundry_run_invoke_agent(*, default_http_client_factory=SimpleNamespac
     }
     module = ast.Module(body=[run_invoke_agent], type_ignores=[])
     exec(compile(ast.fix_missing_locations(module), str(scenario_path), "exec"), namespace)
-    return namespace["run_invoke_agent"], spans
+    run_invoke_agent = namespace["run_invoke_agent"]
+
+    def invoke(client, connection=None):
+        if connection is None:
+            connection = SimpleNamespace(id=_FOUNDRY_CONNECTION_ID)
+        return run_invoke_agent(client, connection)
+
+    return invoke, spans
 
 
 def _run_foundry_program(
@@ -123,6 +135,9 @@ def _run_foundry_program(
         and isinstance(node.test.left, ast.Name)
         and node.test.left.id == "__name__"
     )
+    if client is not None:
+        client.connections = SimpleNamespace(list=lambda: [SimpleNamespace(id=_FOUNDRY_CONNECTION_ID)])
+
     namespace = {
         "AIProjectClient": project_client_factory or (lambda **kwargs: client),
         "FOUNDRY_PROJECT_ENDPOINT": "https://foundry-resource.services.ai.azure.com/api/projects/reference-project",
@@ -130,7 +145,7 @@ def _run_foundry_program(
         "MockTransportPolicy": lambda: object(),
         "SansIOHTTPPolicy": lambda: object(),
         "flush_and_shutdown": flush_and_shutdown,
-        "run_invoke_agent": run_invoke_agent,
+        "run_invoke_agent": lambda actual_client, connection: run_invoke_agent(actual_client),
         "setup_otel": lambda: ("tracer-provider", "logger-provider", "meter-provider"),
     }
     module = ast.Module(body=main_guard.body, type_ignores=[])
@@ -238,15 +253,23 @@ def test_foundry_invoke_agent_refinement_contract():
         for attribute in registry["attributes"]
         if attribute["key"] == "gen_ai.provider.name"
         for member in attribute["type"]["members"]
-        if member["id"] == "azure.ai.foundry"
+        if member["id"] == "microsoft.foundry"
     )
-    assert provider["value"] == "azure.ai.foundry"
+    assert provider["value"] == "microsoft.foundry"
     provider_doc = "https://learn.microsoft.com/azure/foundry/agents/overview"
     assert provider["brief"] == f"[Microsoft Foundry Agent Service]({provider_doc})"
 
+    foundry_registry = _load_semconv_yaml("model/microsoft/foundry/registry.yaml")
+    project_id = next(
+        attribute for attribute in foundry_registry["attributes"] if attribute["key"] == "microsoft.foundry.project.id"
+    )
+    assert project_id["type"] == "string"
+    assert project_id["brief"] == "The full Azure Resource Manager resource ID of the Microsoft Foundry project.\n"
+    assert project_id["examples"] == [_FOUNDRY_PROJECT_ID]
+
     spans = _load_semconv_yaml("model/gen-ai/spans.yaml")
     refinement = next(
-        item for item in spans["span_refinements"] if item["id"] == "azure.ai.foundry.invoke_agent.client"
+        item for item in spans["span_refinements"] if item["id"] == "microsoft.foundry.gen_ai.invoke_agent.client"
     )
     assert refinement["ref"] == "gen_ai.invoke_agent.client"
     assert refinement["brief"] == (
@@ -256,7 +279,7 @@ def test_foundry_invoke_agent_refinement_contract():
     assert refinement["note"] == (
         "This refinement applies when invoking a remotely hosted Foundry agent through the "
         "agent-scoped OpenAI Responses API.\n\n"
-        '`gen_ai.provider.name` MUST be set to `"azure.ai.foundry"` and SHOULD be provided '
+        '`gen_ai.provider.name` MUST be set to `"microsoft.foundry"` and SHOULD be provided '
         "**at span creation time**.\n"
     )
 
@@ -264,6 +287,7 @@ def test_foundry_invoke_agent_refinement_contract():
         "gen_ai.agent.name",
         "gen_ai.conversation.id",
         "gen_ai.request.model",
+        "microsoft.foundry.project.id",
         "server.port",
     }
     attributes = {attribute["ref"]: attribute for attribute in refinement["attributes"]}
@@ -276,6 +300,10 @@ def test_foundry_invoke_agent_refinement_contract():
     assert _required_level(attributes["gen_ai.request.model"]) == (
         "recommended",
         "When the invoked agent has one configured model and it is readily available to instrumentation.",
+    )
+    assert _required_level(attributes["microsoft.foundry.project.id"]) == (
+        "conditionally_required",
+        "When the full project resource ID is readily available to instrumentation.",
     )
     assert _required_level(attributes["server.port"]) == (
         "conditionally_required",
@@ -317,6 +345,10 @@ def test_foundry_agent_reference_uses_agent_scoped_responses_client():
     assert ast.unparse(response_arguments["conversation"]) == "conversation.id"
     assert ast.unparse(response_arguments["input"]) == "USER_INPUT"
 
+    project_id = assignments["project_id"]
+    assert isinstance(project_id, ast.Subscript)
+    assert ast.unparse(project_id) == "connection.id.rsplit('/connections/', 1)[0]"
+
     invoke_attributes = next(
         node
         for node in ast.walk(tree)
@@ -334,14 +366,59 @@ def test_foundry_agent_reference_uses_agent_scoped_responses_client():
         for key, value in zip(invoke_attributes.keys, invoke_attributes.values, strict=True)
         if isinstance(key, ast.Constant) and isinstance(key.value, str)
     }
-    assert ast.literal_eval(invoke_attribute_values["gen_ai.provider.name"]) == "azure.ai.foundry"
+    assert ast.literal_eval(invoke_attribute_values["gen_ai.provider.name"]) == "microsoft.foundry"
     assert ast.unparse(invoke_attribute_values["gen_ai.agent.name"]) == "agent.name"
     assert ast.unparse(invoke_attribute_values["gen_ai.conversation.id"]) == "conversation.id"
+    assert ast.unparse(invoke_attribute_values["microsoft.foundry.project.id"]) == "project_id"
     assert not any(isinstance(node, ast.Constant) and node.value == "agent_reference" for node in ast.walk(tree))
     assert not any(
         isinstance(node, ast.Constant) and node.value == "gen_ai.response.finish_reasons" for node in ast.walk(tree)
     )
     assert not any(isinstance(node, ast.Constant) and node.value == "gen_ai.output.type" for node in ast.walk(tree))
+
+
+def test_foundry_agent_reference_records_project_id_from_connection():
+    run_invoke_agent, spans = _load_foundry_run_invoke_agent()
+    create_version_arguments = {}
+
+    class FakeAgents:
+        def create_version(self, **kwargs):
+            create_version_arguments.update(kwargs)
+            return SimpleNamespace(id="agent-id", name="refimpl-test-agent", version="1")
+
+        def delete_version(self, **kwargs):
+            pass
+
+    class FakeConversations:
+        def create(self):
+            return SimpleNamespace(id="conversation-id")
+
+        def delete(self, **kwargs):
+            pass
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            return SimpleNamespace(id="response-id", output_text="", usage=None)
+
+    class FakeOpenAIClient:
+        conversations = FakeConversations()
+        responses = FakeResponses()
+
+        def close(self):
+            pass
+
+    class FakeClient:
+        agents = FakeAgents()
+
+        def get_openai_client(self, **kwargs):
+            return FakeOpenAIClient()
+
+    run_invoke_agent(FakeClient(), SimpleNamespace(id=_FOUNDRY_CONNECTION_ID))
+
+    invoke_span = spans["invoke_agent refimpl-test-agent"]
+    assert invoke_span.attributes["microsoft.foundry.project.id"] == _FOUNDRY_PROJECT_ID
+    search_tool = create_version_arguments["definition"].tools[1]
+    assert search_tool["azure_ai_search"]["indexes"][0]["project_connection_id"] == _FOUNDRY_CONNECTION_ID
 
 
 def test_foundry_agent_reference_records_create_agent_error_type():

@@ -2,7 +2,9 @@
 
 This scenario uses `azure-ai-projects` to create and invoke a remote Microsoft
 Foundry agent. Invocation goes through an agent-scoped OpenAI Responses client
-and a Foundry conversation.
+and a Foundry conversation. The project resource ID is derived from the
+`Connection.id` returned by `AIProjectClient.connections.list()`. The scenario
+uses that connection to configure the agent's Azure AI Search tool.
 
 Foundry performs the agent's model calls, tool execution, state management, and
 orchestration remotely. The client scenario instruments the create-agent and
