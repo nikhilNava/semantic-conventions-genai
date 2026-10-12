@@ -494,17 +494,10 @@ attributes:
           brief: The initiator does not wait for the target to finish. The target takes control of the remaining work.
           stability: development
     brief: Describes how control passes to the transfer target.
-    note: |
-      Instrumentations SHOULD record this attribute when the instrumented
-      framework or protocol explicitly exposes the tool call as a transfer and
-      makes the transfer mode readily available.
     stability: development
   - key: gen_ai.transfer.target.name
     type: string
     brief: The human-readable name of the agent targeted by the transfer.
-    note: |
-      Instrumentations SHOULD record this attribute when the target agent name
-      is readily available from the instrumented library API or state.
     examples: ["weather_agent"]
     stability: development
   - key: gen_ai.main_agent.id

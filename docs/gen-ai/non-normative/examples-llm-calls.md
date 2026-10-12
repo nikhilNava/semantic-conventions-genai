@@ -943,7 +943,7 @@ sequenceDiagram
 In this example, `root_agent` invokes `weather_specialist` through an agent tool
 and resumes after the specialist returns. Content capturing is disabled.
 
-Source agent span:
+**Source agent span:**
 
 | Property | Value |
 | --- | --- |
@@ -956,7 +956,7 @@ Source agent span:
 | `gen_ai.agent.name` | `"root_agent"` |
 | `gen_ai.request.model` | `"gemini-2.0-flash"` |
 
-Agent tool span:
+**Agent tool span:**
 
 | Property | Value |
 | --- | --- |
@@ -974,7 +974,7 @@ Agent tool span:
 | `gen_ai.transfer.mode` | `"return_to_caller"` |
 | `gen_ai.transfer.target.name` | `"weather_specialist"` |
 
-Target agent span:
+**Target agent span:**
 
 | Property | Value |
 | --- | --- |
@@ -993,7 +993,7 @@ Target agent span:
 In this example, `triage-agent` calls a transfer tool that passes control to
 `billing-agent`. Content capturing is disabled.
 
-Source agent span:
+**Source agent span:**
 
 | Property | Value |
 | --- | --- |
@@ -1006,7 +1006,7 @@ Source agent span:
 | `gen_ai.agent.name` | `"triage-agent"` |
 | `gen_ai.request.model` | `"gpt-4o-mini"` |
 
-Transfer tool span:
+**Transfer tool span:**
 
 | Property | Value |
 | --- | --- |
@@ -1024,7 +1024,7 @@ Transfer tool span:
 | `gen_ai.transfer.mode` | `"pass_control"` |
 | `gen_ai.transfer.target.name` | `"billing-agent"` |
 
-Target agent span:
+**Target agent span:**
 
 | Property | Value |
 | --- | --- |
@@ -1044,7 +1044,7 @@ In this example, `support_agent` invokes `refund_agent` through a remote client.
 The remote process records the target agent's execution in the same trace.
 Content capturing is disabled.
 
-Source agent span:
+**Source agent span:**
 
 | Property | Value |
 | --- | --- |
@@ -1056,7 +1056,7 @@ Source agent span:
 | `gen_ai.operation.name` | `"invoke_agent"` |
 | `gen_ai.agent.name` | `"support_agent"` |
 
-Remote client span:
+**Remote client span:**
 
 | Property | Value |
 | --- | --- |
@@ -1073,7 +1073,7 @@ Remote client span:
 | `server.address` | `"refunds.example.com"` |
 | `server.port` | `443` |
 
-Target agent span:
+**Target agent span:**
 
 | Property | Value |
 | --- | --- |

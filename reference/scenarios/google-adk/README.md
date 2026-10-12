@@ -7,20 +7,16 @@ directly.
 
 The `RemoteA2aAgent` scenario exercises two library-owned invocation paths:
 
-- a `FunctionNode` calls public `Context.run_node` with a
-  `RemoteA2aAgent`;
-- a `routing_agent` invokes a `RemoteA2aAgent` through `AgentTool`;
-  `ToolContext.agent_name` identifies the caller and public `AgentTool.agent`
-  identifies the target. The AgentTool invocation records an execute-tool
-  transfer span, and the remote request records its invoke-agent CLIENT child.
+- a `FunctionNode` calls public `Context.run_node` with a `RemoteA2aAgent`;
+- a `routing_agent` invokes a `RemoteA2aAgent` through `AgentTool`. The
+  execute-tool transfer span reads the source agent from
+  `ToolContext.agent_name` and the target from public `AgentTool.agent`.
 
 Both paths reach an injected public A2A `ClientFactory`, which wraps public
-`Client.send_message` to create the CLIENT span. Two workflow steps call the same
-remote-agent instance concurrently with
-the AgentTool call. The scenario verifies that each CLIENT span keeps the
-matching local `RemoteA2aAgent` execution as its parent. Standard trace context
-correlates the remote calls with the workflow or agent-tool spans without
-separate caller attributes. ADK currently marks its A2A integration as
+`Client.send_message` to create the invoke-agent CLIENT span. Two workflow
+steps and the AgentTool call invoke the same remote-agent instance
+concurrently, and the scenario verifies that each CLIENT span is a child of
+its local `RemoteA2aAgent` execution. ADK marks its A2A integration as
 experimental.
 
 | Operation | Should be instrumented here | Status |
