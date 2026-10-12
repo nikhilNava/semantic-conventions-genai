@@ -5,25 +5,22 @@ through its model layer (e.g. `google-genai`), so it **delegates inference**. It
 owns the agent, workflow, tool, memory, and remote-agent operations it runs
 directly.
 
-The `RemoteA2aAgent` scenario exercises two library-owned caller paths:
+The `RemoteA2aAgent` scenario exercises two library-owned invocation paths:
 
 - a `FunctionNode` calls public `Context.run_node` with a
-  `RemoteA2aAgent`; `Context.node` identifies the workflow step and the
-  `run_node` argument identifies the target;
+  `RemoteA2aAgent`;
 - a `routing_agent` invokes a `RemoteA2aAgent` through `AgentTool`;
   `ToolContext.agent_name` identifies the caller and public `AgentTool.agent`
   identifies the target. The AgentTool invocation records an execute-tool
   transfer span, and the remote request records its invoke-agent CLIENT child.
 
-Instrumentation carries the workflow call through a task-local context because
-ADK schedules the target node in another task. It propagates the AgentTool call
-through OpenTelemetry context. Both paths reach an injected public A2A
-`ClientFactory`, which wraps public `Client.send_message` to create the CLIENT
-span. Two workflow steps call the same remote-agent instance concurrently with
+Both paths reach an injected public A2A `ClientFactory`, which wraps public
+`Client.send_message` to create the CLIENT span. Two workflow steps call the same
+remote-agent instance concurrently with
 the AgentTool call. The scenario verifies that each CLIENT span keeps the
-correct caller and remains a child of the matching local `RemoteA2aAgent`
-execution. It does not use `RemoteA2aAgent.parent_agent`, private ADK state, or
-span topology to infer the caller. ADK currently marks its A2A integration as
+matching local `RemoteA2aAgent` execution as its parent. Standard trace context
+correlates the remote calls with the workflow or agent-tool spans without
+separate caller attributes. ADK currently marks its A2A integration as
 experimental.
 
 | Operation | Should be instrumented here | Status |

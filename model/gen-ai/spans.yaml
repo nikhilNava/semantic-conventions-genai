@@ -516,10 +516,6 @@ spans:
       The `gen_ai.operation.name` SHOULD be `invoke_agent`.
 
       Examples: OpenAI Assistants API, AWS Bedrock Agents.
-
-      Record `gen_ai.caller.*` when the instrumented library or protocol
-      exposes the immediate logical caller as an agent or workflow. These
-      attributes provide logical caller attribution.
     stability: development
     attributes:
       - ref_group: attributes.gen_ai.invoke_agent.common
@@ -549,14 +545,6 @@ spans:
         brief: The version of the invoked GenAI agent.
         requirement_level:
           conditionally_required: When available.
-      - ref: gen_ai.caller.type
-        requirement_level:
-          conditionally_required: When the immediate logical caller is explicitly exposed as an agent or workflow, including when the invocation fails.
-        sampling_relevant: true
-      - ref: gen_ai.caller.name
-        requirement_level:
-          conditionally_required: When `gen_ai.caller.type` is recorded and the caller name is available, including when the invocation fails.
-        sampling_relevant: true
 
   - type: gen_ai.invoke_agent.internal
     requirement_level: recommended
@@ -908,9 +896,9 @@ span_refinements:
     note: |
       This refinement applies to tool calls that the instrumented framework or
       protocol explicitly identifies as agent transfers. Instrumentation SHOULD
-      use this refinement instead of the generic execute-tool span contract.
-      Transfers exposed through other operations use the corresponding span
-      convention.
+      use this refinement to report transfers via tool calls and SHOULD NOT
+      report additional spans for this tool call.
+      It MUST NOT be used for transfers that do not happen through a tool call.
 
       Examples include:
 
@@ -920,14 +908,6 @@ span_refinements:
         that return a `Command` targeting another agent node;
       - [OpenAI Agents tools](https://openai.github.io/openai-agents-python/tools/#agents-as-tools)
         created from another agent.
-
-      `gen_ai.transfer.mode` records whether the agent executing the tool waits
-      for a result and resumes or passes control to the target agent.
-      `gen_ai.transfer.target.name` identifies the target agent.
-      `gen_ai.agent.*` continues to identify the agent executing the tool.
-
-      Applying this refinement updates the semantic contract of the existing
-      execute-tool span. One tool call produces one span.
     stability: development
     attributes:
       - ref: gen_ai.transfer.mode

@@ -2,7 +2,6 @@
 
 import asyncio
 import contextlib
-import contextvars
 import json
 import os
 import pathlib
@@ -16,7 +15,6 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-from opentelemetry import context as _otel_context
 from opentelemetry import trace as _trace
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
 from opentelemetry.trace import SpanKind, StatusCode
@@ -33,7 +31,6 @@ SKILLS_DIR = pathlib.Path(__file__).parent / "skills"
 
 _reference_tracer = reference_tracer()
 _reference_meter = reference_meter()
-_A2A_CALL_CONTEXT_KEY = "reference.google_adk.a2a_call"
 
 _inference_calls = _reference_meter.create_histogram(
     "gen_ai.invoke_agent.inference_calls",
@@ -83,7 +80,7 @@ class SpanCounter(SpanProcessor):
 
 
 class A2ATopologyRecorder(SpanProcessor):
-    """Verify concurrent A2A calls preserve their workflow and agent callers."""
+    """Verify concurrent A2A calls retain their workflow and agent span parents."""
 
     def __init__(self):
         self.workflow_span_id = None
@@ -91,7 +88,7 @@ class A2ATopologyRecorder(SpanProcessor):
         self.agent_tool_span_id = None
         self.agent_tool_parent_span_id = None
         self.internal_spans = {}
-        self.client_calls = {}
+        self.client_calls = []
 
     def on_start(self, span, parent_context=None):
         pass
@@ -122,11 +119,7 @@ class A2ATopologyRecorder(SpanProcessor):
             and span.kind == SpanKind.CLIENT
             and attributes.get("gen_ai.agent.name") == "weather-agent"
         ):
-            caller = (
-                attributes.get("gen_ai.caller.type"),
-                attributes.get("gen_ai.caller.name"),
-            )
-            self.client_calls[caller] = span.parent.span_id if span.parent else None
+            self.client_calls.append(span.parent.span_id if span.parent else None)
 
     def assert_valid(self):
         if self.workflow_span_id is None:
@@ -137,25 +130,24 @@ class A2ATopologyRecorder(SpanProcessor):
             raise AssertionError("AgentTool transfer span was not recorded")
         if self.agent_tool_parent_span_id != self.routing_agent_span_id:
             raise AssertionError("AgentTool transfer span has the wrong routing-agent parent")
-        expected_callers = {
-            ("workflow", "invoke_remote_weather_agent"),
-            ("workflow", "invoke_remote_forecast_agent"),
-            ("agent", "routing_agent"),
-        }
-        if set(self.client_calls) != expected_callers:
-            raise AssertionError(f"A2A CLIENT callers were not correlated correctly: {self.client_calls}")
-        if len(self.internal_spans) != len(expected_callers):
+        if len(self.client_calls) != 3:
+            raise AssertionError(f"Expected three concurrent A2A CLIENT calls, got {len(self.client_calls)}")
+        if len(self.internal_spans) != 3 or set(self.client_calls) != set(self.internal_spans):
             raise AssertionError("Each A2A CLIENT call must have one RemoteA2aAgent INTERNAL parent")
-        for caller, internal_span_id in self.client_calls.items():
-            internal_span = self.internal_spans.get(internal_span_id)
-            if internal_span is None:
-                raise AssertionError(f"A2A CLIENT call {caller} has no RemoteA2aAgent INTERNAL parent")
-            agent_name, parent_span_id = internal_span
-            if caller[0] == "workflow":
-                if agent_name != "workflow_remote_agent" or parent_span_id != self.workflow_span_id:
-                    raise AssertionError(f"Workflow A2A call {caller} has the wrong span topology")
-            elif agent_name != "agent_remote_agent" or parent_span_id != self.agent_tool_span_id:
-                raise AssertionError(f"AgentTool A2A call {caller} has the wrong span topology")
+        workflow_calls = 0
+        agent_tool_calls = 0
+        for internal_span_id in self.client_calls:
+            agent_name, parent_span_id = self.internal_spans[internal_span_id]
+            if agent_name == "workflow_remote_agent":
+                if parent_span_id != self.workflow_span_id:
+                    raise AssertionError("Workflow A2A call has the wrong span topology")
+                workflow_calls += 1
+            else:
+                if parent_span_id != self.agent_tool_span_id:
+                    raise AssertionError("AgentTool A2A call has the wrong span topology")
+                agent_tool_calls += 1
+        if workflow_calls != 2 or agent_tool_calls != 1:
+            raise AssertionError("Expected two workflow A2A calls and one AgentTool A2A call")
 
     def shutdown(self):
         pass
@@ -665,7 +657,6 @@ def run_remote_a2a_agent_reference(topology_recorder):
     from a2a.client.client_factory import ClientFactory
     from a2a.helpers import get_message_text
     from google.adk.agents import Agent
-    from google.adk.agents.context import Context
     from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
     from google.adk.models.base_llm import BaseLlm
     from google.adk.models.llm_response import LlmResponse
@@ -675,11 +666,10 @@ def run_remote_a2a_agent_reference(topology_recorder):
     from google.adk.workflow import START, FunctionNode, Workflow
     from google.genai import types
 
-    print("  [invoke_agent] workflow and agent callers -> A2A remote agent")
+    print("  [invoke_agent] workflow and agent tool -> A2A remote agent")
 
     with _run_a2a_server() as (_server_url, agent_card), _suppress_adk_native_telemetry():
         request_barrier = asyncio.Barrier(3)
-        workflow_call_context = contextvars.ContextVar("workflow_a2a_call_context", default=None)
 
         class _TracingClientFactory(ClientFactory):
             def create(self, card, interceptors=None):
@@ -687,17 +677,12 @@ def run_remote_a2a_agent_reference(topology_recorder):
                 original_send_message = client.send_message
 
                 async def _traced_send_message(request, *, context=None):
-                    call_context = _otel_context.get_value(_A2A_CALL_CONTEXT_KEY)
-                    if call_context is None:
-                        raise RuntimeError("A2A request did not inherit its ADK caller context")
                     await asyncio.wait_for(request_barrier.wait(), timeout=10)
                     target_url = urlparse(card.supported_interfaces[0].url)
                     client_attributes = {
                         "gen_ai.operation.name": "invoke_agent",
                         "gen_ai.agent.name": card.name,
                         "gen_ai.agent.version": card.version,
-                        "gen_ai.caller.type": call_context["caller_type"],
-                        "gen_ai.caller.name": call_context["caller_name"],
                         "server.address": target_url.hostname or "localhost",
                         "server.port": target_url.port or 443,
                     }
@@ -842,7 +827,6 @@ def run_remote_a2a_agent_reference(topology_recorder):
             app_name="a2a_agent_app",
             session_service=agent_sessions,
         )
-        original_context_run_node = Context.run_node
         original_remote_run = RemoteA2aAgent.run_async
         original_agent_tool_run = AgentTool.run_async
 
@@ -851,11 +835,6 @@ def run_remote_a2a_agent_reference(topology_recorder):
                 async for event in original_remote_run(self, parent_context):
                     yield event
                 return
-            call_context = _otel_context.get_value(_A2A_CALL_CONTEXT_KEY)
-            if call_context is None:
-                call_context = workflow_call_context.get()
-            if call_context is None:
-                raise RuntimeError(f"{self.name} did not inherit its ADK caller context")
             agent_attributes = {
                 "gen_ai.operation.name": "invoke_agent",
                 "gen_ai.agent.name": self.name,
@@ -866,39 +845,8 @@ def run_remote_a2a_agent_reference(topology_recorder):
                 attributes=agent_attributes,
             ) as agent_span:
                 agent_span.set_attribute("gen_ai.conversation.id", parent_context.session.id)
-                token = _otel_context.attach(_otel_context.set_value(_A2A_CALL_CONTEXT_KEY, call_context))
-                try:
-                    async for event in original_remote_run(self, parent_context):
-                        yield event
-                finally:
-                    _otel_context.detach(token)
-
-        async def _traced_workflow_run_node(self, node, node_input=None, **kwargs):
-            if node is not workflow_remote_agent:
-                return await original_context_run_node(
-                    self,
-                    node,
-                    node_input=node_input,
-                    **kwargs,
-                )
-            caller = self.node
-            if caller is None:
-                raise RuntimeError("Workflow context did not expose its current node")
-            call_context = {
-                "caller_type": "workflow",
-                "caller_name": caller.name,
-                "remote_agent": node,
-            }
-            token = workflow_call_context.set(call_context)
-            try:
-                return await original_context_run_node(
-                    self,
-                    node,
-                    node_input=node_input,
-                    **kwargs,
-                )
-            finally:
-                workflow_call_context.reset(token)
+                async for event in original_remote_run(self, parent_context):
+                    yield event
 
         async def _traced_agent_tool_run(self, *, args, tool_context):
             if self is not agent_tool:
@@ -907,11 +855,6 @@ def run_remote_a2a_agent_reference(topology_recorder):
                     args=args,
                     tool_context=tool_context,
                 )
-            call_context = {
-                "caller_type": "agent",
-                "caller_name": tool_context.agent_name,
-                "remote_agent": self.agent,
-            }
             tool_attributes = {
                 "gen_ai.operation.name": "execute_tool",
                 "gen_ai.tool.name": self.name,
@@ -928,15 +871,11 @@ def run_remote_a2a_agent_reference(topology_recorder):
                 if tool_context.function_call_id:
                     tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
                 tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps(args))
-                token = _otel_context.attach(_otel_context.set_value(_A2A_CALL_CONTEXT_KEY, call_context))
-                try:
-                    result = await original_agent_tool_run(
-                        self,
-                        args=args,
-                        tool_context=tool_context,
-                    )
-                finally:
-                    _otel_context.detach(token)
+                result = await original_agent_tool_run(
+                    self,
+                    args=args,
+                    tool_context=tool_context,
+                )
                 tool_span.set_attribute("gen_ai.tool.call.result", str(result))
                 return result
 
@@ -1017,7 +956,6 @@ def run_remote_a2a_agent_reference(topology_recorder):
                         await http_client.aclose()
 
         with (
-            _patched_method(Context, "run_node", _traced_workflow_run_node),
             _patched_method(RemoteA2aAgent, "run_async", _traced_remote_run),
             _patched_method(AgentTool, "run_async", _traced_agent_tool_run),
         ):
