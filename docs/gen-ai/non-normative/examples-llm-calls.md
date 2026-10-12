@@ -19,7 +19,6 @@
   - [GenAI client span when content capturing is enabled on span attributes](#genai-client-span-when-content-capturing-is-enabled-on-span-attributes-1)
 - [Agent tool transfer that returns to the source](#agent-tool-transfer-that-returns-to-the-source)
 - [Agent tool transfer that passes control](#agent-tool-transfer-that-passes-control)
-- [Remote agent invocation](#remote-agent-invocation)
 
 <!-- tocstop -->
 
@@ -1037,52 +1036,3 @@ In this example, `triage-agent` calls a transfer tool that passes control to
 | `gen_ai.operation.name` | `"invoke_agent"` |
 | `gen_ai.agent.name` | `"billing-agent"` |
 | `gen_ai.request.model` | `"gpt-4o-mini"` |
-
-## Remote agent invocation
-
-In this example, `support_agent` invokes `refund_agent` through a remote client.
-The remote process records the target agent's execution in the same trace.
-Content capturing is disabled.
-
-**Source agent span:**
-
-| Property | Value |
-| --- | --- |
-| Span name | `"invoke_agent support_agent"` |
-| Span kind | `INTERNAL` |
-| Span status | `UNSET` |
-| Trace id | `"9e5c13a47b2d4068af0193c5e7d9b260"` |
-| Span id | `"5d9fb132468ace02"` |
-| `gen_ai.operation.name` | `"invoke_agent"` |
-| `gen_ai.agent.name` | `"support_agent"` |
-
-**Remote client span:**
-
-| Property | Value |
-| --- | --- |
-| Span name | `"invoke_agent refund_agent"` |
-| Span kind | `CLIENT` |
-| Span status | `UNSET` |
-| Trace id | `"9e5c13a47b2d4068af0193c5e7d9b260"` |
-| Span id | `"6ea0c243579bdf13"` |
-| Parent span id | `"5d9fb132468ace02"` |
-| `gen_ai.operation.name` | `"invoke_agent"` |
-| `gen_ai.provider.name` | `"example.refunds"` |
-| `gen_ai.agent.name` | `"refund_agent"` |
-| `gen_ai.agent.version` | `"1.0.0"` |
-| `server.address` | `"refunds.example.com"` |
-| `server.port` | `443` |
-
-**Target agent span:**
-
-| Property | Value |
-| --- | --- |
-| Span name | `"invoke_agent refund_agent"` |
-| Span kind | `INTERNAL` |
-| Span status | `UNSET` |
-| Trace id | `"9e5c13a47b2d4068af0193c5e7d9b260"` |
-| Span id | `"7fb1d35468ace024"` |
-| Parent span id | `"6ea0c243579bdf13"` |
-| `gen_ai.operation.name` | `"invoke_agent"` |
-| `gen_ai.agent.name` | `"refund_agent"` |
-| `gen_ai.agent.version` | `"1.0.0"` |
