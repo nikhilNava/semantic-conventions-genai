@@ -12,16 +12,6 @@
       "gen_ai.tool.name",
       "gen_ai.tool.type"
     ],
-    "gen_ai.invoke_agent.client": [
-      "gen_ai.agent.description",
-      "gen_ai.agent.name",
-      "gen_ai.agent.version",
-      "gen_ai.input.messages",
-      "gen_ai.operation.name",
-      "gen_ai.provider.name",
-      "server.address",
-      "server.port"
-    ],
     "gen_ai.invoke_agent.internal": [
       "gen_ai.agent.description",
       "gen_ai.agent.name",
@@ -74,9 +64,6 @@
     ],
     "gen_ai.invoke_agent.tool_calls": [
       "gen_ai.agent.name"
-    ],
-    "gen_ai.invoke_workflow.duration": [
-      "gen_ai.workflow.name"
     ]
   },
   "findings": [
@@ -139,30 +126,6 @@
     },
     {
       "id": "genai_expected_attribute_missing",
-      "message": "Span 'invoke_agent agent_remote_agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.response.finish_reasons'",
-      "context": {
-        "missing_attribute": "gen_ai.response.finish_reasons",
-        "operation": "invoke_agent"
-      }
-    },
-    {
-      "id": "genai_expected_attribute_missing",
-      "message": "Span 'invoke_agent agent_remote_agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.usage.input_tokens'",
-      "context": {
-        "missing_attribute": "gen_ai.usage.input_tokens",
-        "operation": "invoke_agent"
-      }
-    },
-    {
-      "id": "genai_expected_attribute_missing",
-      "message": "Span 'invoke_agent agent_remote_agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.usage.output_tokens'",
-      "context": {
-        "missing_attribute": "gen_ai.usage.output_tokens",
-        "operation": "invoke_agent"
-      }
-    },
-    {
-      "id": "genai_expected_attribute_missing",
       "message": "Span 'invoke_agent root_agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.response.finish_reasons'",
       "context": {
         "missing_attribute": "gen_ai.response.finish_reasons",
@@ -180,54 +143,6 @@
     {
       "id": "genai_expected_attribute_missing",
       "message": "Span 'invoke_agent root_agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.usage.output_tokens'",
-      "context": {
-        "missing_attribute": "gen_ai.usage.output_tokens",
-        "operation": "invoke_agent"
-      }
-    },
-    {
-      "id": "genai_expected_attribute_missing",
-      "message": "Span 'invoke_agent routing_agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.response.finish_reasons'",
-      "context": {
-        "missing_attribute": "gen_ai.response.finish_reasons",
-        "operation": "invoke_agent"
-      }
-    },
-    {
-      "id": "genai_expected_attribute_missing",
-      "message": "Span 'invoke_agent routing_agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.usage.input_tokens'",
-      "context": {
-        "missing_attribute": "gen_ai.usage.input_tokens",
-        "operation": "invoke_agent"
-      }
-    },
-    {
-      "id": "genai_expected_attribute_missing",
-      "message": "Span 'invoke_agent routing_agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.usage.output_tokens'",
-      "context": {
-        "missing_attribute": "gen_ai.usage.output_tokens",
-        "operation": "invoke_agent"
-      }
-    },
-    {
-      "id": "genai_expected_attribute_missing",
-      "message": "Span 'invoke_agent weather-agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.response.finish_reasons'",
-      "context": {
-        "missing_attribute": "gen_ai.response.finish_reasons",
-        "operation": "invoke_agent"
-      }
-    },
-    {
-      "id": "genai_expected_attribute_missing",
-      "message": "Span 'invoke_agent weather-agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.usage.input_tokens'",
-      "context": {
-        "missing_attribute": "gen_ai.usage.input_tokens",
-        "operation": "invoke_agent"
-      }
-    },
-    {
-      "id": "genai_expected_attribute_missing",
-      "message": "Span 'invoke_agent weather-agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.usage.output_tokens'",
       "context": {
         "missing_attribute": "gen_ai.usage.output_tokens",
         "operation": "invoke_agent"
@@ -258,30 +173,6 @@
       }
     },
     {
-      "id": "genai_expected_attribute_missing",
-      "message": "Span 'invoke_agent workflow_remote_agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.response.finish_reasons'",
-      "context": {
-        "missing_attribute": "gen_ai.response.finish_reasons",
-        "operation": "invoke_agent"
-      }
-    },
-    {
-      "id": "genai_expected_attribute_missing",
-      "message": "Span 'invoke_agent workflow_remote_agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.usage.input_tokens'",
-      "context": {
-        "missing_attribute": "gen_ai.usage.input_tokens",
-        "operation": "invoke_agent"
-      }
-    },
-    {
-      "id": "genai_expected_attribute_missing",
-      "message": "Span 'invoke_agent workflow_remote_agent' (operation 'invoke_agent') is missing expected attribute 'gen_ai.usage.output_tokens'",
-      "context": {
-        "missing_attribute": "gen_ai.usage.output_tokens",
-        "operation": "invoke_agent"
-      }
-    },
-    {
       "id": "unit_mismatch",
       "message": "Unit should be '{inference_call}', but found '1'.",
       "context": {
@@ -295,15 +186,6 @@
       "context": {
         "expected": "{tool_call}",
         "unit": "1"
-      }
-    },
-    {
-      "id": "genai_span_name_format",
-      "message": "execute_tool span name should be 'execute_tool' or 'execute_tool <value of gen_ai.tool.name>', got 'execute_tool agent_remote_agent agent_remote_agent'",
-      "context": {
-        "expected_form": "execute_tool or 'execute_tool <gen_ai.tool.name>'",
-        "keyed_attr": "gen_ai.tool.name",
-        "operation": "execute_tool"
       }
     },
     {
