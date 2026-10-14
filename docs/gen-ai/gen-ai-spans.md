@@ -761,10 +761,10 @@ instrumentations do not cover.
 
 When the library API or state identifies a specialized tool call,
 instrumentation SHOULD apply the corresponding
-[refinement](gen-ai-agent-spans.md#execute-tool-span) to the execute-tool
+[refinement](/docs/gen-ai/gen-ai-agent-spans.md#execute-tool-span) to the execute-tool
 span. Available refinements include
-[agents exposed as tools](gen-ai-agent-spans.md#agent-as-a-tool) and
-[Agent Skills](https://agentskills.io).
+[agents exposed as tools](/docs/gen-ai/gen-ai-agent-spans.md#agent-as-a-tool) and
+[Agent Skills](/docs/gen-ai/gen-ai-agent-spans.md#agent-skills).
 
 **Span name** SHOULD be `execute_tool {gen_ai.tool.name}`.
 

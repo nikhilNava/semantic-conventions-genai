@@ -104,9 +104,14 @@ async def agent_node(state: GraphState) -> GraphState:
             agent_span.set_attribute("gen_ai.usage.input_tokens", usage["input_tokens"])
         if usage.get("output_tokens"):
             agent_span.set_attribute("gen_ai.usage.output_tokens", usage["output_tokens"])
+        finish_reason = final_message.response_metadata.get("finish_reason")
+        output_message = {"role": "assistant", "parts": [{"type": "text", "content": final_message.text()}]}
+        if finish_reason is not None:
+            agent_span.set_attribute("gen_ai.response.finish_reasons", [finish_reason])
+            output_message["finish_reason"] = finish_reason
         agent_span.set_attribute(
             "gen_ai.output.messages",
-            json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": final_message.text()}]}]),
+            json.dumps([output_message]),
         )
         return {"messages": state["messages"] + [final_message.text()]}
 
@@ -366,42 +371,39 @@ async def run_tool_handoff_reference():
                         "ParentCommand.update['messages'] must include an AIMessage tool call for the handoff."
                     ) from None
                 tool_call = handoff_message.tool_calls[0]
+                finish_reason = handoff_message.response_metadata.get("finish_reason")
+                output_message = {
+                    "role": "assistant",
+                    "parts": [
+                        {
+                            "type": "tool_call",
+                            "id": tool_call["id"],
+                            "name": tool_call["name"],
+                            "arguments": tool_call["args"],
+                        }
+                    ],
+                }
+                if finish_reason is not None:
+                    source_span.set_attribute("gen_ai.response.finish_reasons", [finish_reason])
+                    output_message["finish_reason"] = finish_reason
                 source_span.set_attribute(
                     "gen_ai.output.messages",
-                    json.dumps(
-                        [
-                            {
-                                "role": "assistant",
-                                "parts": [
-                                    {
-                                        "type": "tool_call",
-                                        "id": tool_call["id"],
-                                        "name": tool_call["name"],
-                                        "arguments": tool_call["args"],
-                                    }
-                                ],
-                                "finish_reason": (handoff_message.response_metadata or {}).get(
-                                    "finish_reason", "tool_calls"
-                                ),
-                            }
-                        ]
-                    ),
+                    json.dumps([output_message]),
                 )
                 return command
 
             last_message = result["messages"][-1]
-            finish_reason = (getattr(last_message, "response_metadata", None) or {}).get("finish_reason", "stop")
+            finish_reason = last_message.response_metadata.get("finish_reason")
+            output_message = {
+                "role": "assistant",
+                "parts": [{"type": "text", "content": str(last_message.content)}],
+            }
+            if finish_reason is not None:
+                source_span.set_attribute("gen_ai.response.finish_reasons", [finish_reason])
+                output_message["finish_reason"] = finish_reason
             source_span.set_attribute(
                 "gen_ai.output.messages",
-                json.dumps(
-                    [
-                        {
-                            "role": "assistant",
-                            "parts": [{"type": "text", "content": str(last_message.content)}],
-                            "finish_reason": finish_reason,
-                        }
-                    ]
-                ),
+                json.dumps([output_message]),
             )
             return result
 
@@ -418,18 +420,17 @@ async def run_tool_handoff_reference():
             result = await target_agent.ainvoke(state)
             output_message = result["messages"][-1]
             output = output_message.text()
-            finish_reason = (getattr(output_message, "response_metadata", None) or {}).get("finish_reason", "stop")
+            finish_reason = output_message.response_metadata.get("finish_reason")
+            output_message_content = {
+                "role": "assistant",
+                "parts": [{"type": "text", "content": output}],
+            }
+            if finish_reason is not None:
+                target_span.set_attribute("gen_ai.response.finish_reasons", [finish_reason])
+                output_message_content["finish_reason"] = finish_reason
             target_span.set_attribute(
                 "gen_ai.output.messages",
-                json.dumps(
-                    [
-                        {
-                            "role": "assistant",
-                            "parts": [{"type": "text", "content": output}],
-                            "finish_reason": finish_reason,
-                        }
-                    ]
-                ),
+                json.dumps([output_message_content]),
             )
             return result
 

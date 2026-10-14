@@ -1110,11 +1110,8 @@ Examples include:
 - [OpenAI Agents tools](https://openai.github.io/openai-agents-python/tools/#agents-as-tools)
   created from another agent.
 
-**Span name** SHOULD be
-`execute_tool {gen_ai.tool.name} {gen_ai.transfer.target.name}` when
-`gen_ai.transfer.target.name` is readily available at span creation and
-has low cardinality. Otherwise, it SHOULD be
-`execute_tool {gen_ai.tool.name}`.
+**Span name** SHOULD be `execute_tool {gen_ai.tool.name}`.
+Semantic conventions for individual frameworks MAY specify different span name format.
 
 **Span kind** SHOULD be `INTERNAL`.
 

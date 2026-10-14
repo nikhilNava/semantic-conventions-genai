@@ -959,7 +959,7 @@ and resumes after the specialist returns. Content capturing is disabled.
 
 | Property | Value |
 | --- | --- |
-| Span name | `"execute_tool weather_specialist weather_specialist"` |
+| Span name | `"execute_tool weather_specialist"` |
 | Span kind | `INTERNAL` |
 | Span status | `UNSET` |
 | Trace id | `"4bf92f3577b34da6a3ce929d0e0e4736"` |
@@ -990,7 +990,21 @@ and resumes after the specialist returns. Content capturing is disabled.
 ## Agent tool transfer that passes control
 
 In this example, `triage-agent` calls a transfer tool that passes control to
-`billing-agent`. Content capturing is disabled.
+`billing-agent`. The enclosing workflow invokes the agents as separate steps,
+so their spans are siblings. The transfer tool selects the next agent but does
+not invoke it. Content capturing is disabled.
+
+**Enclosing workflow span:**
+
+| Property | Value |
+| --- | --- |
+| Span name | `"invoke_workflow agent_handoff"` |
+| Span kind | `INTERNAL` |
+| Span status | `UNSET` |
+| Trace id | `"7d3a91e25c6f408ab2e019f7d4c83560"` |
+| Span id | `"5d9fb1324680ace2"` |
+| `gen_ai.operation.name` | `"invoke_workflow"` |
+| `gen_ai.workflow.name` | `"agent_handoff"` |
 
 **Source agent span:**
 
@@ -1001,6 +1015,7 @@ In this example, `triage-agent` calls a transfer tool that passes control to
 | Span status | `UNSET` |
 | Trace id | `"7d3a91e25c6f408ab2e019f7d4c83560"` |
 | Span id | `"2a6c8e0f13579bdf"` |
+| Parent span id | `"5d9fb1324680ace2"` |
 | `gen_ai.operation.name` | `"invoke_agent"` |
 | `gen_ai.agent.name` | `"triage-agent"` |
 | `gen_ai.request.model` | `"gpt-4o-mini"` |
@@ -1009,7 +1024,7 @@ In this example, `triage-agent` calls a transfer tool that passes control to
 
 | Property | Value |
 | --- | --- |
-| Span name | `"execute_tool transfer_to_billing_agent billing-agent"` |
+| Span name | `"execute_tool transfer_to_billing_agent"` |
 | Span kind | `INTERNAL` |
 | Span status | `UNSET` |
 | Trace id | `"7d3a91e25c6f408ab2e019f7d4c83560"` |
@@ -1032,7 +1047,7 @@ In this example, `triage-agent` calls a transfer tool that passes control to
 | Span status | `UNSET` |
 | Trace id | `"7d3a91e25c6f408ab2e019f7d4c83560"` |
 | Span id | `"4c8ea0213579bdf1"` |
-| Parent span id | `"3b7d9f102468ace0"` |
+| Parent span id | `"5d9fb1324680ace2"` |
 | `gen_ai.operation.name` | `"invoke_agent"` |
 | `gen_ai.agent.name` | `"billing-agent"` |
 | `gen_ai.request.model` | `"gpt-4o-mini"` |

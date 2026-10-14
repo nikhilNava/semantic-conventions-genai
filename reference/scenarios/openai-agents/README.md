@@ -4,6 +4,9 @@ The OpenAI Agents SDK orchestrates agents. It calls the model through the
 `openai` client, so it **delegates inference**. It owns the agent run and tool
 execution it drives directly, including the sandbox tools it ships.
 
+Agent-as-tool calls use `execute_tool {gen_ai.tool.name}` span names and record
+the target separately in `gen_ai.transfer.target.name`.
+
 | Operation | Should be instrumented here | Status |
 | --- | --- | --- |
 | inference (`chat`) | No — delegates to the `openai` client | ✅ Correctly not emitted |

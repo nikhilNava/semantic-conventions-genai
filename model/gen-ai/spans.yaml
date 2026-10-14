@@ -594,10 +594,10 @@ spans:
 
       When the library API or state identifies a specialized tool call,
       instrumentation SHOULD apply the corresponding
-      [refinement](gen-ai-agent-spans.md#execute-tool-span) to the execute-tool
+      [refinement](/docs/gen-ai/gen-ai-agent-spans.md#execute-tool-span) to the execute-tool
       span. Available refinements include
-      [agents exposed as tools](gen-ai-agent-spans.md#agent-as-a-tool) and
-      [Agent Skills](https://agentskills.io).
+      [agents exposed as tools](/docs/gen-ai/gen-ai-agent-spans.md#agent-as-a-tool) and
+      [Agent Skills](/docs/gen-ai/gen-ai-agent-spans.md#agent-skills).
     stability: development
     entity_associations:
       - "gen_ai.main_agent"
@@ -886,11 +886,8 @@ span_refinements:
     ref: gen_ai.execute_tool.internal
     name:
       note: |
-        **Span name** SHOULD be
-        `execute_tool {gen_ai.tool.name} {gen_ai.transfer.target.name}` when
-        `gen_ai.transfer.target.name` is readily available at span creation and
-        has low cardinality. Otherwise, it SHOULD be
-        `execute_tool {gen_ai.tool.name}`.
+        **Span name** SHOULD be `execute_tool {gen_ai.tool.name}`.
+        Semantic conventions for individual frameworks MAY specify different span name format.
     brief: >
       Describes a tool call that transfers work or control to another agent.
     note: |

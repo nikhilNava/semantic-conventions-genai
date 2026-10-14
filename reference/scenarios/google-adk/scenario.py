@@ -455,7 +455,7 @@ def run_multi_agent_delegation_reference():
                 **transfer_attributes,
             }
             with _reference_tracer.start_as_current_span(
-                f"execute_tool {agent_tool.name} {specialist.name}", attributes=tool_span_attributes
+                f"execute_tool {agent_tool.name}", attributes=tool_span_attributes
             ) as tool_span:
                 if tool_context.function_call_id:
                     tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
@@ -469,7 +469,14 @@ def run_multi_agent_delegation_reference():
                 with _reference_tracer.start_as_current_span(
                     f"invoke_agent {specialist.name}", attributes=sub_agent_span_attributes
                 ) as sub_agent_span:
-                    result = await original_run_async(args=args, tool_context=tool_context)
+
+                    def record_specialist_response(callback_context, llm_response):
+                        if llm_response.finish_reason is not None:
+                            finish_reason = getattr(llm_response.finish_reason, "value", llm_response.finish_reason)
+                            sub_agent_span.set_attribute("gen_ai.response.finish_reasons", [str(finish_reason).lower()])
+
+                    with _patched_method(specialist, "after_model_callback", record_specialist_response):
+                        result = await original_run_async(args=args, tool_context=tool_context)
                     sub_agent_span.set_attribute(
                         "gen_ai.output.messages",
                         json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(result)}]}]),
@@ -504,15 +511,20 @@ def run_multi_agent_delegation_reference():
                     json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}]),
                 )
                 last_text = ""
+                finish_reason = None
                 async for event in runner.run_async(
                     user_id="test_user",
                     session_id=session.id,
                     new_message=types.Content(role="user", parts=[types.Part(text=input_text)]),
                 ):
+                    if event.author == root_agent.name and event.finish_reason is not None:
+                        finish_reason = getattr(event.finish_reason, "value", event.finish_reason)
                     if event.content and event.content.parts:
                         text = event.content.parts[0].text
                         if text:
                             last_text = text
+                if finish_reason is not None:
+                    agent_span.set_attribute("gen_ai.response.finish_reasons", [str(finish_reason).lower()])
                 if last_text:
                     agent_span.set_attribute(
                         "gen_ai.output.messages",

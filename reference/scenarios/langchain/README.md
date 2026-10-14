@@ -6,6 +6,9 @@ that belongs to the LLM library and is captured as a child span. LangChain owns
 the framework operations it performs directly: retrieval, planning, and tool
 execution.
 
+The tool-handoff scenario records each agent's finish reason from its response
+metadata. The source and target agent spans share the enclosing graph span.
+
 | Operation | Should be instrumented here | Status |
 | --- | --- | --- |
 | inference (`chat`) | No — delegates to the LLM client (`openai`) | ✅ Correctly not emitted |
