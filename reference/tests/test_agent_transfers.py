@@ -12,6 +12,7 @@ class AgentTransferTests(unittest.TestCase):
         agents = {
             "google-adk": ("root_agent", "weather_specialist"),
             "langchain": ("triage-agent", "weather-agent"),
+            "openai-agents": ("assistant", "weather-specialist"),
         }
         for library, names in agents.items():
             with self.subTest(library=library):
@@ -24,6 +25,25 @@ class AgentTransferTests(unittest.TestCase):
                     and any(f"invoke_agent {name}'" in finding["message"] for name in names)
                 ]
                 self.assertEqual(missing, [])
+
+    def test_agent_spans_report_available_token_counts(self):
+        agents = {
+            "google-adk": ("root_agent", "weather_specialist"),
+            "langchain": ("triage-agent", "weather-agent"),
+            "openai-agents": ("assistant", "weather-specialist"),
+        }
+        for library, names in agents.items():
+            data = json.loads((SCENARIOS / library / "data.json").read_text(encoding="utf-8"))
+            for attribute in ("gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens"):
+                with self.subTest(library=library, attribute=attribute):
+                    self.assertIn(attribute, data["spans"]["gen_ai.invoke_agent.internal"])
+                    missing = [
+                        finding["message"]
+                        for finding in data["findings"]
+                        if finding["context"].get("missing_attribute") == attribute
+                        and any(f"invoke_agent {name}'" in finding["message"] for name in names)
+                    ]
+                    self.assertEqual(missing, [])
 
     def test_agent_tool_names_do_not_repeat_the_target(self):
         tools = {

@@ -4,9 +4,13 @@ import asyncio
 import json
 import os
 from typing import TypedDict
+from unittest.mock import patch
 
 from langchain_core.tools import tool
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
+from opentelemetry.trace import StatusCode
 from reference_shared import flush_and_shutdown, reference_tracer, setup_otel
 
 MOCK_BASE_URL = os.environ["MOCK_LLM_URL"] + "/v1"
@@ -21,11 +25,13 @@ _reference_tracer = reference_tracer()
 class TransferSpanRecorder(SpanProcessor):
     def __init__(self):
         self.transfers: set[tuple[str, str, str, str]] = set()
+        self.spans: list[ReadableSpan] = []
 
     def on_start(self, span, parent_context=None):
         pass
 
     def on_end(self, span: ReadableSpan):
+        self.spans.append(span)
         attributes = span.attributes or {}
         transfer_mode = attributes.get("gen_ai.transfer.mode")
         if transfer_mode is None:
@@ -49,6 +55,29 @@ class TransferSpanRecorder(SpanProcessor):
         assert self.transfers == {
             ("execute_tool", "triage-agent", "pass_control", "weather-agent"),
         }
+        workflows = [span for span in self.spans if span.name == "invoke_workflow agent_handoff"]
+        assert len(workflows) == 1
+        workflow = workflows[0]
+        agents = [
+            span
+            for span in self.spans
+            if span.parent is not None
+            and span.parent.span_id == workflow.context.span_id
+            and span.attributes.get("gen_ai.operation.name") == "invoke_agent"
+        ]
+        assert len(agents) == 2
+        source = next(span for span in agents if span.attributes["gen_ai.agent.name"] == "triage-agent")
+        target = next(span for span in agents if span.attributes["gen_ai.agent.name"] == "weather-agent")
+        assert source.end_time <= target.start_time
+        for agent in agents:
+            assert agent.status.status_code != StatusCode.ERROR
+            assert agent.attributes["gen_ai.response.finish_reasons"]
+            assert agent.attributes["gen_ai.usage.input_tokens"] >= 0
+            assert agent.attributes["gen_ai.usage.output_tokens"] >= 0
+        transfers = [span for span in self.spans if span.attributes.get("gen_ai.transfer.mode") == "pass_control"]
+        assert len(transfers) == 1
+        assert transfers[0].name == "execute_tool transfer_to_weather_agent"
+        assert transfers[0].parent.span_id == source.context.span_id
 
 
 @tool
@@ -250,6 +279,20 @@ def run_execute_tool_reference():
     print(f"    -> {tool_message.content[:60]}")
 
 
+def _agent_handoff_target(command, graph):
+    """Resolve a parent-graph route to an SDK-identifiable LangChain agent."""
+    if not isinstance(command, Command) or command.graph != Command.PARENT or not isinstance(command.goto, str):
+        return None
+    node = graph.nodes.get(command.goto)
+    if node is None or not isinstance(node.bound, CompiledStateGraph):
+        return None
+    target = node.bound
+    metadata = (target.config or {}).get("metadata", {})
+    if metadata.get("ls_integration") != "langchain_create_agent" or not metadata.get("lc_agent_name"):
+        return None
+    return target
+
+
 async def run_tool_handoff_reference():
     """Transfer control through LangChain's documented handoff-tool pattern."""
     from langchain.agents import AgentState, create_agent
@@ -258,7 +301,6 @@ async def run_tool_handoff_reference():
     from langchain_openai import ChatOpenAI
     from langgraph.errors import ParentCommand
     from langgraph.graph import END, START, StateGraph
-    from langgraph.types import Command
 
     print("  [handoff] LangGraph tool handoff (reference implementation)")
 
@@ -282,7 +324,7 @@ async def run_tool_handoff_reference():
             "execute_tool transfer_to_weather_agent",
             attributes=tool_span_attributes,
         ) as tool_span:
-            tool_span.set_attribute("gen_ai.agent.name", source_name)
+            tool_span.set_attribute("gen_ai.agent.name", source_agent.config["metadata"]["lc_agent_name"])
             tool_span.set_attribute("gen_ai.tool.call.id", runtime.tool_call_id)
             last_ai_message = next(
                 message for message in reversed(runtime.state["messages"]) if isinstance(message, AIMessage)
@@ -300,15 +342,10 @@ async def run_tool_handoff_reference():
                 },
                 graph=Command.PARENT,
             )
-            if not isinstance(command, Command):
-                raise TypeError("Expected LangGraph tool to return a Command")
-            if command.graph != Command.PARENT:
-                raise ValueError("Expected LangGraph command to target the parent graph")
-            if not isinstance(command.goto, str):
-                raise TypeError("Expected LangGraph command to contain one named target")
-
-            tool_span.set_attribute("gen_ai.transfer.mode", "pass_control")
-            tool_span.set_attribute("gen_ai.transfer.target.name", command.goto)
+            target = _agent_handoff_target(command, graph)
+            if target is not None:
+                tool_span.set_attribute("gen_ai.transfer.mode", "pass_control")
+                tool_span.set_attribute("gen_ai.transfer.target.name", target.config["metadata"]["lc_agent_name"])
             tool_span.set_attribute("gen_ai.tool.call.result", f"goto={command.goto}")
             return command
 
@@ -330,14 +367,18 @@ async def run_tool_handoff_reference():
         name=target_name,
     )
 
-    async def call_source(state: AgentState):
+    original_source_ainvoke = source_agent.ainvoke
+    original_target_ainvoke = target_agent.ainvoke
+
+    async def call_source(state, config=None, **kwargs):
         source_span_attributes = {
             "gen_ai.operation.name": "invoke_agent",
             "gen_ai.request.model": request_model,
-            "gen_ai.agent.name": source_name,
+            "gen_ai.agent.name": source_agent.config["metadata"]["lc_agent_name"],
         }
+        parent_command = None
         with _reference_tracer.start_as_current_span(
-            f"invoke_agent {source_name}",
+            f"invoke_agent {source_agent.name}",
             attributes=source_span_attributes,
         ) as source_span:
             input_message = state["messages"][-1]
@@ -354,8 +395,9 @@ async def run_tool_handoff_reference():
                 ),
             )
             try:
-                result = await source_agent.ainvoke(state)
+                result = await original_source_ainvoke(state, config, **kwargs)
             except ParentCommand as bubble_up:
+                parent_command = bubble_up
                 command = bubble_up.args[0]
                 handoff_message = None
                 for message in reversed(command.update["messages"]):
@@ -371,6 +413,11 @@ async def run_tool_handoff_reference():
                         "ParentCommand.update['messages'] must include an AIMessage tool call for the handoff."
                     ) from None
                 tool_call = handoff_message.tool_calls[0]
+                usage = handoff_message.usage_metadata or {}
+                if usage.get("input_tokens") is not None:
+                    source_span.set_attribute("gen_ai.usage.input_tokens", usage["input_tokens"])
+                if usage.get("output_tokens") is not None:
+                    source_span.set_attribute("gen_ai.usage.output_tokens", usage["output_tokens"])
                 finish_reason = handoff_message.response_metadata.get("finish_reason")
                 output_message = {
                     "role": "assistant",
@@ -390,35 +437,48 @@ async def run_tool_handoff_reference():
                     "gen_ai.output.messages",
                     json.dumps([output_message]),
                 )
-                return command
+            else:
+                last_message = result["messages"][-1]
+                usage = last_message.usage_metadata or {}
+                if usage.get("input_tokens") is not None:
+                    source_span.set_attribute("gen_ai.usage.input_tokens", usage["input_tokens"])
+                if usage.get("output_tokens") is not None:
+                    source_span.set_attribute("gen_ai.usage.output_tokens", usage["output_tokens"])
+                finish_reason = last_message.response_metadata.get("finish_reason")
+                output_message = {
+                    "role": "assistant",
+                    "parts": [{"type": "text", "content": str(last_message.content)}],
+                }
+                if finish_reason is not None:
+                    source_span.set_attribute("gen_ai.response.finish_reasons", [finish_reason])
+                    output_message["finish_reason"] = finish_reason
+                source_span.set_attribute(
+                    "gen_ai.output.messages",
+                    json.dumps([output_message]),
+                )
+        # ParentCommand is SDK control flow, not an agent error. Let LangGraph
+        # handle it after the source span has ended without an error status.
+        if parent_command is not None:
+            raise parent_command
+        return result
 
-            last_message = result["messages"][-1]
-            finish_reason = last_message.response_metadata.get("finish_reason")
-            output_message = {
-                "role": "assistant",
-                "parts": [{"type": "text", "content": str(last_message.content)}],
-            }
-            if finish_reason is not None:
-                source_span.set_attribute("gen_ai.response.finish_reasons", [finish_reason])
-                output_message["finish_reason"] = finish_reason
-            source_span.set_attribute(
-                "gen_ai.output.messages",
-                json.dumps([output_message]),
-            )
-            return result
-
-    async def call_target(state: AgentState):
+    async def call_target(state, config=None, **kwargs):
         target_span_attributes = {
             "gen_ai.operation.name": "invoke_agent",
             "gen_ai.request.model": request_model,
-            "gen_ai.agent.name": target_name,
+            "gen_ai.agent.name": target_agent.config["metadata"]["lc_agent_name"],
         }
         with _reference_tracer.start_as_current_span(
-            f"invoke_agent {target_name}",
+            f"invoke_agent {target_agent.name}",
             attributes=target_span_attributes,
         ) as target_span:
-            result = await target_agent.ainvoke(state)
+            result = await original_target_ainvoke(state, config, **kwargs)
             output_message = result["messages"][-1]
+            usage = output_message.usage_metadata or {}
+            if usage.get("input_tokens") is not None:
+                target_span.set_attribute("gen_ai.usage.input_tokens", usage["input_tokens"])
+            if usage.get("output_tokens") is not None:
+                target_span.set_attribute("gen_ai.usage.output_tokens", usage["output_tokens"])
             output = output_message.text()
             finish_reason = output_message.response_metadata.get("finish_reason")
             output_message_content = {
@@ -435,22 +495,26 @@ async def run_tool_handoff_reference():
             return result
 
     builder = StateGraph(AgentState)
-    builder.add_node(source_name, call_source)
-    builder.add_node(target_name, call_target)
+    builder.add_node(source_name, source_agent)
+    builder.add_node(target_name, target_agent)
     builder.add_edge(START, source_name)
     builder.add_edge(target_name, END)
-    graph = builder.compile()
+    graph = builder.compile(name="agent_handoff")
 
     input_text = "What's the weather in Seattle?"
-    workflow_name = "agent_handoff"
+    workflow_name = graph.name
     workflow_span_attributes = {
         "gen_ai.operation.name": "invoke_workflow",
         "gen_ai.workflow.name": workflow_name,
     }
-    with _reference_tracer.start_as_current_span(
-        f"invoke_workflow {workflow_name}",
-        attributes=workflow_span_attributes,
-    ) as workflow_span:
+    with (
+        patch.object(source_agent, "ainvoke", call_source),
+        patch.object(target_agent, "ainvoke", call_target),
+        _reference_tracer.start_as_current_span(
+            f"invoke_workflow {workflow_name}",
+            attributes=workflow_span_attributes,
+        ) as workflow_span,
+    ):
         workflow_span.set_attribute(
             "gen_ai.input.messages",
             json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}]),

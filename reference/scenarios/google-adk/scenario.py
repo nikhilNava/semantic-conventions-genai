@@ -8,6 +8,7 @@ import pathlib
 import shutil
 import tempfile
 import time
+from unittest.mock import patch
 
 from opentelemetry import trace as _trace
 from opentelemetry.sdk.trace import SpanProcessor
@@ -35,22 +36,6 @@ _tool_calls = _reference_meter.create_histogram(
     unit="{tool_call}",
     description="The number of tool calls a GenAI agent makes during a single invocation.",
 )
-
-
-@contextlib.contextmanager
-def _patched_method(obj, name, replacement):
-    """Temporarily replace the ``obj.name`` bound method with ``replacement`` as
-    an instrumentation seam, always restoring the original in ``finally`` --
-    including on exceptions. Repo rules allow patching a public or private method
-    as a seam as long as the scenario still enters through the library's public
-    API; this helper just guarantees the patch is symmetric.
-    """
-    original = getattr(obj, name)
-    setattr(obj, name, replacement)
-    try:
-        yield
-    finally:
-        setattr(obj, name, original)
 
 
 class SpanCounter(SpanProcessor):
@@ -431,17 +416,14 @@ def run_multi_agent_delegation_reference():
         )
         agent_tool = AgentTool(agent=specialist)
 
-        # Wrap the tool's public run_async to open the caller-owned execute_tool
-        # span around the real sub-agent invocation. The entry point stays
-        # runner.run_async; the patched method is installed and restored in
-        # `finally` by `_patched_method` below.
         original_run_async = agent_tool.run_async
+        original_runner_run_async = Runner.run_async
 
         async def _traced_run_async(*, args, tool_context):
             transfer_attributes = {
-                "gen_ai.agent.name": root_agent.name,
+                "gen_ai.agent.name": tool_context.agent_name,
                 "gen_ai.transfer.mode": "return_to_caller",
-                "gen_ai.transfer.target.name": specialist.name,
+                "gen_ai.transfer.target.name": agent_tool.agent.name,
             }
             assert transfer_attributes == {
                 "gen_ai.agent.name": "root_agent",
@@ -452,6 +434,7 @@ def run_multi_agent_delegation_reference():
                 "gen_ai.operation.name": "execute_tool",
                 "gen_ai.tool.name": agent_tool.name,
                 "gen_ai.tool.type": "function",
+                "gen_ai.conversation.id": tool_context.session.id,
                 **transfer_attributes,
             }
             with _reference_tracer.start_as_current_span(
@@ -460,29 +443,54 @@ def run_multi_agent_delegation_reference():
                 if tool_context.function_call_id:
                     tool_span.set_attribute("gen_ai.tool.call.id", tool_context.function_call_id)
                 tool_span.set_attribute("gen_ai.tool.call.arguments", json.dumps(args))
-                sub_agent_span_attributes = {
-                    "gen_ai.operation.name": "invoke_agent",
-                    "gen_ai.request.model": request_model,
-                    "gen_ai.agent.name": specialist.name,
-                    "gen_ai.agent.description": specialist.description,
-                }
-                with _reference_tracer.start_as_current_span(
-                    f"invoke_agent {specialist.name}", attributes=sub_agent_span_attributes
-                ) as sub_agent_span:
-
-                    def record_specialist_response(callback_context, llm_response):
-                        if llm_response.finish_reason is not None:
-                            finish_reason = getattr(llm_response.finish_reason, "value", llm_response.finish_reason)
-                            sub_agent_span.set_attribute("gen_ai.response.finish_reasons", [str(finish_reason).lower()])
-
-                    with _patched_method(specialist, "after_model_callback", record_specialist_response):
-                        result = await original_run_async(args=args, tool_context=tool_context)
-                    sub_agent_span.set_attribute(
-                        "gen_ai.output.messages",
-                        json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(result)}]}]),
-                    )
+                result = await original_run_async(args=args, tool_context=tool_context)
                 tool_span.set_attribute("gen_ai.tool.call.result", str(result))
             return result
+
+        async def _traced_specialist_run_async(active_runner, *, session_id, **kwargs):
+            agent = active_runner.agent
+            if agent is not agent_tool.agent:
+                async for event in original_runner_run_async(active_runner, session_id=session_id, **kwargs):
+                    yield event
+                return
+            sub_agent_span_attributes = {
+                "gen_ai.operation.name": "invoke_agent",
+                "gen_ai.request.model": agent.model.model,
+                "gen_ai.agent.name": agent.name,
+                "gen_ai.agent.description": agent.description,
+                "gen_ai.conversation.id": session_id,
+            }
+            with _reference_tracer.start_as_current_span(
+                f"invoke_agent {agent.name}", attributes=sub_agent_span_attributes
+            ) as sub_agent_span:
+                input_tokens = None
+                output_tokens = None
+                last_text = ""
+                async for event in original_runner_run_async(active_runner, session_id=session_id, **kwargs):
+                    if event.author == agent.name:
+                        usage = event.usage_metadata
+                        if usage is not None:
+                            if usage.prompt_token_count is not None:
+                                input_tokens = (input_tokens or 0) + usage.prompt_token_count
+                            if usage.candidates_token_count is not None:
+                                output_tokens = (output_tokens or 0) + usage.candidates_token_count
+                        if event.finish_reason is not None:
+                            finish_reason = getattr(event.finish_reason, "value", event.finish_reason)
+                            sub_agent_span.set_attribute("gen_ai.response.finish_reasons", [str(finish_reason).lower()])
+                        if event.content and event.content.parts:
+                            for part in event.content.parts:
+                                if part.text:
+                                    last_text = part.text
+                    yield event
+                if input_tokens is not None:
+                    sub_agent_span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
+                if output_tokens is not None:
+                    sub_agent_span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
+                if last_text:
+                    sub_agent_span.set_attribute(
+                        "gen_ai.output.messages",
+                        json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": last_text}]}]),
+                    )
 
         root_agent = Agent(
             name="root_agent",
@@ -512,17 +520,30 @@ def run_multi_agent_delegation_reference():
                 )
                 last_text = ""
                 finish_reason = None
+                input_tokens = None
+                output_tokens = None
                 async for event in runner.run_async(
                     user_id="test_user",
                     session_id=session.id,
                     new_message=types.Content(role="user", parts=[types.Part(text=input_text)]),
                 ):
-                    if event.author == root_agent.name and event.finish_reason is not None:
-                        finish_reason = getattr(event.finish_reason, "value", event.finish_reason)
-                    if event.content and event.content.parts:
-                        text = event.content.parts[0].text
-                        if text:
-                            last_text = text
+                    if event.author == root_agent.name:
+                        usage = event.usage_metadata
+                        if usage is not None:
+                            if usage.prompt_token_count is not None:
+                                input_tokens = (input_tokens or 0) + usage.prompt_token_count
+                            if usage.candidates_token_count is not None:
+                                output_tokens = (output_tokens or 0) + usage.candidates_token_count
+                        if event.finish_reason is not None:
+                            finish_reason = getattr(event.finish_reason, "value", event.finish_reason)
+                        if event.content and event.content.parts:
+                            for part in event.content.parts:
+                                if part.text:
+                                    last_text = part.text
+                if input_tokens is not None:
+                    agent_span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
+                if output_tokens is not None:
+                    agent_span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
                 if finish_reason is not None:
                     agent_span.set_attribute("gen_ai.response.finish_reasons", [str(finish_reason).lower()])
                 if last_text:
@@ -532,9 +553,10 @@ def run_multi_agent_delegation_reference():
                     )
                     print(f"    -> {last_text[:60]}")
 
-        # `_patched_method` installs the caller-owned execute_tool run_async seam
-        # and restores it in `finally`. The entry point stays runner.run_async.
-        with _patched_method(agent_tool, "run_async", _traced_run_async):
+        with (
+            patch.object(agent_tool, "run_async", _traced_run_async),
+            patch.object(Runner, "run_async", _traced_specialist_run_async),
+        ):
             asyncio.run(_run())
 
 

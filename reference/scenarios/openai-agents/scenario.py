@@ -6,14 +6,16 @@ span, against a mock OpenAI server, with manual OTel spans.
 """
 
 import asyncio
-import contextlib
 import json
 import os
 import posixpath
+from contextvars import ContextVar
+from unittest.mock import patch
 
 import openai
 from agents import Agent, RunConfig, Runner, function_tool
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+from agents.run import AgentRunner
 from agents.tool import FunctionTool, ToolContext
 from opentelemetry import trace
 from opentelemetry.trace import StatusCode
@@ -24,22 +26,6 @@ MOCK_BASE_URL = os.environ["MOCK_LLM_URL"] + "/v1"
 SANDBOX_SHELL = "/bin/bash"
 
 _reference_tracer = reference_tracer()
-
-
-@contextlib.contextmanager
-def _patched_method(obj, name, replacement):
-    """Temporarily replace the ``obj.name`` bound method with ``replacement`` as
-    an instrumentation seam, always restoring the original in ``finally`` --
-    including on exceptions. Repo rules allow patching a public or private method
-    as a seam as long as the scenario still enters through the library's public
-    API; this helper just guarantees the patch is symmetric.
-    """
-    original = getattr(obj, name)
-    setattr(obj, name, replacement)
-    try:
-        yield
-    finally:
-        setattr(obj, name, original)
 
 
 @function_tool
@@ -168,16 +154,13 @@ async def run_agent_as_tool_delegation():
         tool_description="Delegate weather questions to the weather specialist agent.",
     )
 
-    # Wrap the tool's public invoker to open the caller-owned execute_tool span
-    # around the real sub-agent invocation. The entry point stays `Runner.run`;
-    # the patched invoker is restored in `finally` by `_patched_method` below.
     original_on_invoke_tool = weather_tool.on_invoke_tool
 
     async def _traced_on_invoke_tool(tool_context, input_json):
         transfer_attributes = {
-            "gen_ai.agent.name": caller.name,
+            "gen_ai.agent.name": tool_context.agent.name,
             "gen_ai.transfer.mode": "return_to_caller",
-            "gen_ai.transfer.target.name": specialist.name,
+            "gen_ai.transfer.target.name": weather_tool._agent_instance.name,
         }
         assert transfer_attributes == {
             "gen_ai.agent.name": "assistant",
@@ -195,20 +178,65 @@ async def run_agent_as_tool_delegation():
         ) as tool_span:
             tool_span.set_attribute("gen_ai.tool.call.id", tool_context.tool_call_id)
             tool_span.set_attribute("gen_ai.tool.call.arguments", input_json)
-            target_span_attributes = {
-                "gen_ai.operation.name": "invoke_agent",
-                "gen_ai.request.model": request_model,
-                "gen_ai.agent.name": specialist.name,
-            }
-            with _reference_tracer.start_as_current_span(
-                f"invoke_agent {specialist.name}", attributes=target_span_attributes
-            ) as target_span:
-                result = await original_on_invoke_tool(tool_context, input_json)
-                target_span.set_attribute(
-                    "gen_ai.output.messages",
-                    json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(result)}]}]),
-                )
+            result = await original_on_invoke_tool(tool_context, input_json)
             tool_span.set_attribute("gen_ai.tool.call.result", str(result))
+        return result
+
+    model_responses = ContextVar("delegation_model_responses", default=None)
+    original_create = client.chat.completions.create
+    original_agent_run = AgentRunner.run
+
+    async def _capture_create(*args, **kwargs):
+        response = await original_create(*args, **kwargs)
+        responses = model_responses.get()
+        if responses is not None:
+            responses.append(response)
+        return response
+
+    async def _traced_agent_run(runner, starting_agent, input, **kwargs):
+        agent_span_attributes = {
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.request.model": starting_agent.model.model,
+            "gen_ai.agent.name": starting_agent.name,
+        }
+        with _reference_tracer.start_as_current_span(
+            f"invoke_agent {starting_agent.name}", attributes=agent_span_attributes
+        ) as agent_span:
+            agent_span.set_attribute(
+                "gen_ai.system_instructions", json.dumps([{"type": "text", "content": starting_agent.instructions}])
+            )
+            agent_span.set_attribute(
+                "gen_ai.input.messages", json.dumps([{"role": "user", "parts": [{"type": "text", "content": input}]}])
+            )
+            responses = []
+            token = model_responses.set(responses)
+            try:
+                result = await original_agent_run(runner, starting_agent, input, **kwargs)
+            finally:
+                model_responses.reset(token)
+            # Agent.as_tool shares context usage with its caller. Each run's raw
+            # responses identify its own model usage without counting the other agent.
+            if result.raw_responses:
+                agent_span.set_attribute(
+                    "gen_ai.usage.input_tokens", sum(response.usage.input_tokens for response in result.raw_responses)
+                )
+                agent_span.set_attribute(
+                    "gen_ai.usage.output_tokens", sum(response.usage.output_tokens for response in result.raw_responses)
+                )
+            finish_reasons = []
+            if responses:
+                finish_reasons = [
+                    choice.finish_reason for choice in responses[-1].choices if choice.finish_reason is not None
+                ]
+                if finish_reasons:
+                    agent_span.set_attribute("gen_ai.response.finish_reasons", finish_reasons)
+            output_message = {
+                "role": "assistant",
+                "parts": [{"type": "text", "content": str(result.final_output)}],
+            }
+            if len(finish_reasons) == 1:
+                output_message["finish_reason"] = finish_reasons[0]
+            agent_span.set_attribute("gen_ai.output.messages", json.dumps([output_message]))
         return result
 
     caller = Agent(
@@ -220,32 +248,12 @@ async def run_agent_as_tool_delegation():
     input_text = "What's the weather in Seattle?"
 
     print("  [delegation] agent-as-tool via Agent.as_tool (reference implementation)")
-    # `_patched_method` installs the caller-owned execute_tool invoker and restores
-    # it in `finally`. The caller's whole logical invocation is the public
-    # `Runner.run(caller, ...)` call, so its execution span wraps that call directly
-    # and owns the caller's input and response.
-    caller_span_attributes = {
-        "gen_ai.operation.name": "invoke_agent",
-        "gen_ai.request.model": request_model,
-        "gen_ai.agent.name": caller.name,
-    }
     with (
-        _patched_method(weather_tool, "on_invoke_tool", _traced_on_invoke_tool),
-        _reference_tracer.start_as_current_span(
-            f"invoke_agent {caller.name}", attributes=caller_span_attributes
-        ) as caller_span,
+        patch.object(weather_tool, "on_invoke_tool", _traced_on_invoke_tool),
+        patch.object(AgentRunner, "run", _traced_agent_run),
+        patch.object(client.chat.completions, "create", _capture_create),
     ):
-        caller_span.set_attribute(
-            "gen_ai.system_instructions", json.dumps([{"type": "text", "content": caller.instructions}])
-        )
-        caller_span.set_attribute(
-            "gen_ai.input.messages", json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}])
-        )
         result = await Runner.run(caller, input_text)
-        caller_span.set_attribute(
-            "gen_ai.output.messages",
-            json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": str(result.final_output)}]}]),
-        )
     print(f"    -> {str(result.final_output)[:60]}")
 
 

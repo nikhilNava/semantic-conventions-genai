@@ -5,7 +5,14 @@ The OpenAI Agents SDK orchestrates agents. It calls the model through the
 execution it drives directly, including the sandbox tools it ships.
 
 Agent-as-tool calls use `execute_tool {gen_ai.tool.name}` span names and record
-the target separately in `gen_ai.transfer.target.name`.
+the SDK tool's target separately in `gen_ai.transfer.target.name`. Agent spans
+wrap actual SDK runner calls, so argument validation failures do not create a
+specialist invocation span.
+
+Each agent records finish reasons from its own captured model responses and
+token counts from its `RunResult.raw_responses`. The SDK shares context usage
+between an agent tool and its caller, so that shared total would incorrectly
+include the other agent's model calls.
 
 | Operation | Should be instrumented here | Status |
 | --- | --- | --- |
