@@ -647,11 +647,11 @@ def run_multi_agent_handoff_reference():
                                     json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": text}]}]),
                                 )
                     yield event
+        finally:
             if input_tokens is not None:
                 span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
             if output_tokens is not None:
                 span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
-        finally:
             span.end()
 
     async def run():

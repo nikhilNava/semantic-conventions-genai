@@ -67,6 +67,9 @@ class NativeTransferTests(unittest.TestCase):
         self.assertEqual(transfer.parent.span_id, agents["root_agent"].context.span_id)
         self.assertLessEqual(transfer.end_time, agents["weather_specialist"].start_time)
         self.assertEqual(transfer.context.trace_id, agents["weather_specialist"].context.trace_id)
+        for agent in agents.values():
+            self.assertEqual(agent.attributes["gen_ai.usage.input_tokens"], 12)
+            self.assertEqual(agent.attributes["gen_ai.usage.output_tokens"], 4)
         provider.shutdown()
 
 
