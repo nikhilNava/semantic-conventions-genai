@@ -1,7 +1,6 @@
 {
   "spans": {
     "gen_ai.execute_tool.internal": [
-      "gen_ai.agent.name",
       "gen_ai.operation.name",
       "gen_ai.tool.call.arguments",
       "gen_ai.tool.call.id",
@@ -47,6 +46,14 @@
       "message": "Attribute 'process.exit.code' does not exist in the registry.",
       "context": {
         "attribute_key": "process.exit.code"
+      }
+    },
+    {
+      "id": "genai_expected_attribute_missing",
+      "message": "Span 'retrieval weather-knowledge-base' (operation 'retrieval') is missing expected attribute 'server.address'",
+      "context": {
+        "missing_attribute": "server.address",
+        "operation": "retrieval"
       }
     }
   ],

@@ -14,6 +14,12 @@ token counts from its `RunResult.raw_responses`. The SDK shares context usage
 between an agent tool and its caller, so that shared total would incorrectly
 include the other agent's model calls.
 
+The workflow also exercises native `handoff()`. Instrumentation wraps the
+selected handoff's `on_invoke_handoff` at the SDK's `execute_handoffs` boundary,
+where the source agent and function-tool call are available. The returned agent
+provides the target name. The tool records `pass_control` and ends before the
+target's SDK turn begins. Each agent's turn has its own `invoke_agent` span.
+
 | Operation | Should be instrumented here | Status |
 | --- | --- | --- |
 | inference (`chat`) | No — delegates to the `openai` client | ✅ Correctly not emitted |

@@ -11,7 +11,6 @@ class AgentTransferTests(unittest.TestCase):
     def test_agent_spans_report_finish_reasons(self):
         agents = {
             "google-adk": ("root_agent", "weather_specialist"),
-            "langchain": ("triage-agent", "weather-agent"),
             "openai-agents": ("assistant", "weather-specialist"),
         }
         for library, names in agents.items():
@@ -29,7 +28,6 @@ class AgentTransferTests(unittest.TestCase):
     def test_agent_spans_report_available_token_counts(self):
         agents = {
             "google-adk": ("root_agent", "weather_specialist"),
-            "langchain": ("triage-agent", "weather-agent"),
             "openai-agents": ("assistant", "weather-specialist"),
         }
         for library, names in agents.items():

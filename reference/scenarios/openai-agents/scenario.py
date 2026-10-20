@@ -86,7 +86,9 @@ async def run_agent():
                 [
                     {
                         "type": "function",
-                        "function": {"name": t.name, "description": t.description, "parameters": t.params_json_schema},
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.params_json_schema,
                     }
                     for t in tools
                     if isinstance(t, FunctionTool)
@@ -358,6 +360,8 @@ async def run_command_execution():
 async def run_workflow():
     """Run a multi-agent handoff wrapped in a workflow span representing the SDK workflow tracing."""
     from agents import handoff
+    from agents import run as agent_run
+    from agents.run_internal import turn_resolution
 
     client = openai.AsyncOpenAI(base_url=MOCK_BASE_URL, api_key="mock-key")
     request_model = "gpt-4o-mini"
@@ -376,6 +380,75 @@ async def run_workflow():
     )
     input_text = "What's the weather in Seattle?"
 
+    original_execute_handoffs = turn_resolution.execute_handoffs
+    original_run_single_turn = agent_run.run_single_turn
+    original_create = client.chat.completions.create
+
+    async def traced_execute_handoffs(*, public_agent, run_handoffs, **kwargs):
+        # The SDK executes only the first handoff when a model requests several.
+        selected = run_handoffs[0]
+        original_invoke = selected.handoff.on_invoke_handoff
+
+        async def traced_invoke(context, arguments):
+            attributes = {
+                "gen_ai.operation.name": "execute_tool",
+                "gen_ai.tool.name": selected.tool_call.name,
+                "gen_ai.tool.type": "function",
+                "gen_ai.agent.name": public_agent.name,
+            }
+            with _reference_tracer.start_as_current_span(
+                f"execute_tool {selected.tool_call.name}", attributes=attributes
+            ) as span:
+                span.set_attribute("gen_ai.tool.call.id", selected.tool_call.call_id)
+                span.set_attribute("gen_ai.tool.call.arguments", arguments)
+                target = await original_invoke(context, arguments)
+                span.set_attribute("gen_ai.transfer.mode", "pass_control")
+                span.set_attribute("gen_ai.transfer.target.name", target.name)
+                span.set_attribute("gen_ai.tool.call.result", selected.handoff.get_transfer_message(target))
+                return target
+
+        with patch.object(selected.handoff, "on_invoke_handoff", traced_invoke):
+            return await original_execute_handoffs(public_agent=public_agent, run_handoffs=run_handoffs, **kwargs)
+
+    async def traced_run_single_turn(*, bindings, **kwargs):
+        agent = bindings.public_agent
+        attributes = {
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.agent.name": agent.name,
+            "gen_ai.request.model": agent.model.model,
+        }
+        with _reference_tracer.start_as_current_span(f"invoke_agent {agent.name}", attributes=attributes) as span:
+            result = await original_run_single_turn(bindings=bindings, **kwargs)
+            span.set_attribute("gen_ai.usage.input_tokens", result.model_response.usage.input_tokens)
+            span.set_attribute("gen_ai.usage.output_tokens", result.model_response.usage.output_tokens)
+            parts = []
+            for item in result.model_response.output:
+                if item.type == "message":
+                    parts.extend(
+                        {"type": "text", "content": content.text}
+                        for content in item.content
+                        if content.type == "output_text"
+                    )
+                elif item.type == "function_call":
+                    parts.append(
+                        {
+                            "type": "tool_call",
+                            "id": item.call_id,
+                            "name": item.name,
+                            "arguments": json.loads(item.arguments),
+                        }
+                    )
+            if parts:
+                span.set_attribute("gen_ai.output.messages", json.dumps([{"role": "assistant", "parts": parts}]))
+            return result
+
+    async def capture_create(*args, **kwargs):
+        response = await original_create(*args, **kwargs)
+        finish_reasons = [choice.finish_reason for choice in response.choices if choice.finish_reason is not None]
+        if finish_reasons:
+            trace.get_current_span().set_attribute("gen_ai.response.finish_reasons", finish_reasons)
+        return response
+
     print("  [workflow_run] agent run as workflow (reference implementation)")
     workflow_name = "sequential-agents"
     workflow_span_attributes = {
@@ -389,9 +462,12 @@ async def run_workflow():
             "gen_ai.input.messages", json.dumps([{"role": "user", "parts": [{"type": "text", "content": input_text}]}])
         )
 
-        # Note: Agent spans (invoke_agent) are expected to be children of the
-        # workflow span but are omitted for brevity in this scenario.
-        result = await Runner.run(agent_a, input_text, run_config=RunConfig(workflow_name=workflow_name))
+        with (
+            patch.object(turn_resolution, "execute_handoffs", traced_execute_handoffs),
+            patch.object(agent_run, "run_single_turn", traced_run_single_turn),
+            patch.object(client.chat.completions, "create", capture_create),
+        ):
+            result = await Runner.run(agent_a, input_text, run_config=RunConfig(workflow_name=workflow_name))
 
         if result.final_output:
             output_messages = json.dumps(
